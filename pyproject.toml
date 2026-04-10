@@ -1,0 +1,48 @@
+# Package specification, as defined here:
+# https://packaging.python.org/en/latest/specifications/pyproject-toml/#pyproject-toml-spec
+
+[build-system]
+requires = ["setuptools", "setuptools-git-versioning<2"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools-git-versioning]
+enabled = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project]
+name = "thinkpack"
+# version = "0.0.0"
+dynamic = ["version"]
+description = "Tools for preventing think collapse in reasoning language models."
+readme = "README.md"
+authors = [{ name = "Lukas Twist", email = "itsluketwist@gmail.com" }]
+license = { file = "LICENSE" }
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+]
+keywords = ["thinkpack", "llm", "reasoning", "think-collapse", "fine-tuning"]
+requires-python = ">=3.11"
+
+dependencies = [
+    "datasets",
+    "transformers",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit",
+    "pytest",
+    "pytest-cov",
+    "ty",
+    "uv",
+]
+
+[project.urls]
+Homepage = "https://github.com/itsluketwist/thinkpack"
+
+[tool.uv]
+exclude-newer = "7 days"

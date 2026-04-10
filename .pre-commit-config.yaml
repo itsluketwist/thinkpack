@@ -1,0 +1,43 @@
+files: 'src/|tests/'
+
+repos:
+
+# pre-commit
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 'v6.0.0'
+    hooks:
+      - id: check-case-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: requirements-txt-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-xml
+
+# isort
+-   repo: https://github.com/PyCQA/isort
+    rev: '7.0.0'
+    hooks:
+      - id: isort
+        args: ["--line-length=88", "--multi-line=3", "--lines-after-imports=2", "--trailing-comma"]
+
+# ruff linter and formatter
+-   repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.11
+    hooks:
+      - id: ruff-check
+        types_or: [ python, pyi, jupyter ]
+        args: [ --fix ]
+      - id: ruff-format
+        types_or: [ python, pyi, jupyter ]
+
+# ty type-checker (local hook as no official pre-commit repo exists yet)
+-   repo: local
+    hooks:
+      - id: ty
+        name: ty
+        entry: uv run --extra dev ty check src tests
+        language: system
+        types: [python]
+        pass_filenames: false

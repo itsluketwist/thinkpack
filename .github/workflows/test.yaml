@@ -1,0 +1,35 @@
+name: test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+
+  # testing job configuration and steps
+  test:
+
+    runs-on: ubuntu-latest
+
+    environment:
+      name: test
+
+    strategy:
+      matrix:
+        # test on all versions supported (up to the newest)
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+
+      - name: 1. Checkout the code...
+        uses: actions/checkout@v3
+
+      - name: 2. Configure Python version ${{ matrix.python-version }}...
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 3. Run the tests...
+        run: uv run pytest
