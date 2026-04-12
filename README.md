@@ -1,20 +1,22 @@
-# ThinkPack
+# `thinkpack`
 
 ![ThinkPack](assets/banner.png)
 
-A lightweight toolkit for working with reasoning blocks in language models — preventing think collapse via los masking, steering reasoning at inference time, and parsing model outputs.
+A lightweight toolkit for working with reasoning blocks when training and evaluating language models
 
-**Think collapse** is a failure mode where reasoning models stop using their `<think>...</think>` blocks during or after fine-tuning.
-Without intervention, the model learns to skip reasoning entirely — producing answers directly and losing the chain-of-thought behaviour it was trained on.
-ThinkPack provides three targeted tools to prevent this:
+`thinkpack` provides five modules covering the full reasoning model workflow:
 
-- **Loss masking** (`thinkpack.mask`) — keeps reasoning blocks in the training context while masking them from the loss, so the model doesn't learn to skip them.
-- **Thought steering** (`thinkpack.steer`) — injects a short primer after the opening reasoning tag at inference time, nudging the model to reason before answering.
-- **Response parsing** (`thinkpack.parse`) — splits raw model output into reasoning and answer components, with flags for truncation detection.
+- **[Loss masking](#thinkpackmask--training-time-loss-masking)** (`thinkpack.mask`) — keeps reasoning blocks in the training context while masking them from the loss, so the model doesn't learn to skip them.
+- **[Thought steering](#thinkpacksteer--inference-time-thought-steering)** (`thinkpack.steer`) — injects a short primer after the opening reasoning tag at inference time, nudging the model to reason before answering.
+- **[Response parsing](#thinkpackparse--response-parsing)** (`thinkpack.parse`) — splits raw model output into reasoning and answer components, with flags for truncation detection.
+- **[Reasoning distillation](#thinkpackdistill--distillation-prompt-building-and-reasoning-extraction)** (`thinkpack.distill`) — builds prompts for a teacher model to generate reasoning traces, then extracts and writes them back into your records.
+- **[Hybrid decoding](#thinkpackhybrid--hybrid-decoding)** (`thinkpack.hybrid`) — separates reasoning and answering across a base model and a fine-tuned adapter for improved output quality.
 
 ---
 
-## Installation
+## *installation*
+
+Install directly from PyPI:
 
 ```bash
 pip install thinkpack
@@ -22,7 +24,7 @@ pip install thinkpack
 
 ---
 
-## Modules
+## *modules*
 
 ### `thinkpack.mask` — Training-time loss masking
 
