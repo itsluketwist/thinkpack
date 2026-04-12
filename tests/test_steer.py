@@ -168,3 +168,77 @@ class TestApplySteerTemplate:
         )
 
         assert result[0].endswith("<think>\n")
+
+
+class TestSteerClose:
+    """Tests for steer() with close=True — produces a complete reasoning block."""
+
+    def test_inline_no_prefix_closed(self) -> None:
+        """For an INLINE template with no prefix, an empty closed block is injected."""
+        tokenizer = MockTokenizer(prefixed=False)
+        result = steer(prompts=["my prompt"], tokenizer=tokenizer, close=True)
+
+        assert result[0] == "my prompt<think>\n</think>\n"
+
+    def test_inline_with_prefix_closed(self) -> None:
+        """For an INLINE template with a prefix, a complete block is injected."""
+        tokenizer = MockTokenizer(prefixed=False)
+        result = steer(
+            prompts=["my prompt"],
+            tokenizer=tokenizer,
+            prefix="Okay, let me think.",
+            close=True,
+        )
+
+        assert result[0] == "my prompt<think>\nOkay, let me think.\n</think>\n"
+
+    def test_prefixed_no_prefix_closed(self) -> None:
+        """For a PREFIXED template (open tag already present), only close tag is appended."""
+        tokenizer = MockTokenizer(prefixed=True)
+        result = steer(
+            prompts=["my prompt<think>"],
+            tokenizer=tokenizer,
+            close=True,
+        )
+
+        assert result[0] == "my prompt<think></think>\n"
+        assert result[0].count("<think>") == 1
+
+    def test_prefixed_with_prefix_closed(self) -> None:
+        """For a PREFIXED template with a prefix, body and close tag are appended."""
+        tokenizer = MockTokenizer(prefixed=True)
+        result = steer(
+            prompts=["my prompt<think>"],
+            tokenizer=tokenizer,
+            prefix="Okay, ",
+            close=True,
+        )
+
+        assert result[0] == "my prompt<think>\nOkay, \n</think>\n"
+        assert result[0].count("<think>") == 1
+
+    def test_alternative_tag_close(self) -> None:
+        """A custom tag produces the correct closing tag."""
+        tokenizer = MockTokenizer(prefixed=False)
+        result = steer(
+            prompts=["my prompt"],
+            tokenizer=tokenizer,
+            prefix="Okay, ",
+            tag="reasoning",
+            close=True,
+        )
+
+        assert result[0] == "my prompt<reasoning>\nOkay, \n</reasoning>\n"
+
+    def test_apply_steer_template_close(self) -> None:
+        """apply_steer_template passes close=True through to steer()."""
+        tokenizer = MockTokenizer(prefixed=False)
+        result = apply_steer_template(
+            conversations=[[{"role": "user", "content": "q"}]],
+            tokenizer=tokenizer,
+            prefix="Okay, ",
+            close=True,
+        )
+
+        assert result[0].endswith("</think>\n")
+        assert "<think>\nOkay, \n</think>\n" in result[0]

@@ -29,6 +29,7 @@ def steer(
     tokenizer: object,
     prefix: SimplePrefix | str | None = None,
     tag: str | None = None,
+    close: bool = False,
 ) -> list[str]:
     """Inject a thought-steering prefix into chat-templated prompt strings.
 
@@ -40,12 +41,19 @@ def steer(
     The prompts should already be chat-templated strings (e.g. as returned by
     tokenizer.apply_chat_template with add_generation_prompt=True).
 
+    When close=True, the reasoning block is closed after the prefix, producing
+    a complete <think>...</think> block. The model then generates its response
+    after the closed block. This is useful as a universal interface for injecting
+    a fixed reasoning block rather than steering an open-ended thought.
+
     Returns a list of prompt strings ready to pass directly to a generation function.
     """
     model_info = detect_model(tokenizer=tokenizer)
     # user-supplied tag overrides the detected default (useful for INLINE models
     # whose tag differs from the <think> default, e.g. <reasoning>)
     open_tag = f"<{tag}>" if tag is not None else model_info.open_tag
+    # close tag is derived by inserting "/" after the opening "<"
+    close_tag = open_tag.replace("<", "</", 1)
 
     steered = []
     for prompt in prompts:
@@ -53,18 +61,41 @@ def steer(
         already_open = prompt.rstrip("\n").endswith(open_tag)
 
         if prefix is None:
-            # just ensure the prompt ends with an open reasoning tag
-            if already_open:
-                steered.append(prompt)
+            if close:
+                # inject an empty reasoning block — model responds after it
+                if already_open:
+                    steered.append(prompt + close_tag + "\n")
+                else:
+                    steered.append(prompt + open_tag + "\n" + close_tag + "\n")
             else:
-                steered.append(prompt + open_tag + "\n")
+                # just ensure the prompt ends with an open reasoning tag
+                if already_open:
+                    steered.append(prompt)
+                else:
+                    steered.append(prompt + open_tag + "\n")
         else:
             # inject the prefix as the beginning of the thought content
             if already_open:
                 # PREFIXED template already appended the tag — add only the body
-                steered.append(prompt + "\n" + str(prefix))
+                if close:
+                    steered.append(
+                        prompt + "\n" + str(prefix) + "\n" + close_tag + "\n"
+                    )
+                else:
+                    steered.append(prompt + "\n" + str(prefix))
             else:
-                steered.append(prompt + open_tag + "\n" + str(prefix))
+                if close:
+                    steered.append(
+                        prompt
+                        + open_tag
+                        + "\n"
+                        + str(prefix)
+                        + "\n"
+                        + close_tag
+                        + "\n",
+                    )
+                else:
+                    steered.append(prompt + open_tag + "\n" + str(prefix))
 
     return steered
 
@@ -74,13 +105,14 @@ def apply_steer_template(
     tokenizer: object,
     prefix: SimplePrefix | str | None = None,
     tag: str | None = None,
+    close: bool = False,
 ) -> list[str]:
     """Apply the chat template and inject a thought-steering prefix in one step.
 
     Convenience wrapper that combines tokenizer.apply_chat_template() and steer()
     into a single call. Accepts a list of conversations (each a list of message dicts
     with "role" and "content" keys) and returns steered prompt strings ready for
-    generation.
+    generation. Pass close=True to produce a complete closed reasoning block.
 
     Returns a list of steered prompt strings, one per conversation.
     """
@@ -102,4 +134,5 @@ def apply_steer_template(
         tokenizer=tokenizer,
         prefix=prefix,
         tag=tag,
+        close=close,
     )
