@@ -50,22 +50,14 @@ def parse(
     - truncated standard: <think>content...      (open tag, no close tag)
     - truncated prefixed: content...             (no tags; only detectable with prefixed=True)
 
-    Set prefixed=True for PREFIXED template models, where the chat template injects
-    the opening <think> tag automatically so it never appears in decoded output
-    (detectable via detect_model(tokenizer).style == TemplateStyle.PREFIXED).
-
-    Pass tag (e.g. "reasoning", "thought") to restrict matching to a single tag name
-    instead of the default set (think, thinking, reasoning, thought). Useful when the
-    model's tag is known, to avoid false matches on other variants.
-
     Returns a ParsedResponse with the split content and status flags.
     """
     # compile tag-specific patterns if the caller has specified an exact tag name,
     # otherwise fall back to the shared patterns that match all known variants
     if tag is not None:
         escaped = re.escape(tag)
-        open_re = re.compile(rf"<{escaped}>", re.IGNORECASE)
-        close_re = re.compile(rf"</{escaped}>", re.IGNORECASE)
+        open_re = re.compile(rf"<({escaped})>", re.IGNORECASE)
+        close_re = re.compile(rf"</({escaped})>", re.IGNORECASE)
     else:
         open_re = _REASONING_OPEN_TAG
         close_re = _REASONING_CLOSE_TAG

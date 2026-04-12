@@ -37,7 +37,7 @@ def _build_assistant_message(
     record: dict[str, str],
     style: TemplateStyle,
     open_tag: str,
-) -> dict:
+) -> dict[str, str]:
     """
     Build the assistant message dict from a training record.
 
@@ -51,18 +51,18 @@ def _build_assistant_message(
     """
     # use None sentinel to distinguish "key absent" from "key present but empty"
     reasoning_raw = record.get("reasoning", None)
-    reasoning = reasoning_raw.strip() if reasoning_raw is not None else None
     response = record["response"]
 
-    message: dict = {"role": "assistant"}
+    message: dict[str, str] = {"role": "assistant"}
 
     if reasoning_raw is not None and style == TemplateStyle.NATIVE:
         # template natively handles reasoning via a dedicated field (e.g. Qwen3)
         message["content"] = response
-        message["reasoning_content"] = reasoning
+        message["reasoning_content"] = reasoning_raw.strip()
     elif reasoning_raw is not None:
         # derive the closing tag from the opening tag, e.g. <think> -> </think>
         close_tag = open_tag.replace("<", "</", 1)
+        reasoning = reasoning_raw.strip()
         message["content"] = f"{open_tag}\n{reasoning}\n{close_tag}\n{response}"
     else:
         message["content"] = response
@@ -205,25 +205,11 @@ def mask(
 
     Each record must have "instruction" and "response" keys. An optional "reasoning"
     key provides think block content — if absent when masking is applied, an empty
-    reasoning block is injected so the training context matches inference time
-    (PREFIXED template models always emit a reasoning block regardless of content).
+    reasoning block is injected so training context matches inference time.
 
     Template style (INLINE, NATIVE, PREFIXED) is detected automatically from the
-    tokenizer — no manual flags needed.
-
-    The `masked` parameter selects which sections to exclude from the loss:
-        Mask.THINK               — mask only the think block (default)
-        Mask.PROMPT | Mask.THINK — mask prompt and think (train on response only)
-        None                     — no masking; trains on all tokens
-
-    For INLINE models that use a non-default tag (e.g. <reasoning> instead of
-    <think>), pass tag="reasoning" to override the detected default. PREFIXED
-    and NATIVE models always use the tag extracted from the template.
-
-    The `ignore_index` should match the value used by the trainer's loss function.
-    PyTorch's CrossEntropyLoss defaults to -100, which all major training frameworks
-    (transformers Trainer, trl SFTTrainer, unsloth) inherit — only change this if
-    your trainer is explicitly configured otherwise.
+    tokenizer. Combine Mask flags with | to mask multiple sections at once (see
+    the Mask class for details). Pass masked=None to train on all tokens.
 
     Returns a HuggingFace Dataset with input_ids, labels, and attention_mask columns.
     """

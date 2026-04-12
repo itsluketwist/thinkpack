@@ -33,21 +33,12 @@ def steer(
     """Inject a thought-steering prefix into chat-templated prompt strings.
 
     Ensures each prompt ends with an open reasoning block, optionally seeded
-    with a custom prefix to guide the model's thinking before it generates.
-
-    - prefix=None:   ensures the opening tag is present (already the case for
-                     PREFIXED templates; appended for INLINE/NATIVE templates)
-    - prefix=<str>:  the string is placed immediately after the opening tag,
-                     seeding the model's thought. Use SimplePrefix for common
-                     presets, or pass any string for a custom prefix.
-
-    For INLINE models that use a non-default tag (e.g. <reasoning> instead of
-    <think>), pass tag="reasoning" to override the detected default. PREFIXED
-    and NATIVE models always use the tag extracted from the template.
+    with a prefix string to guide the model's thinking. Use SimplePrefix for
+    common presets, or pass any string for a custom prefix. Template style
+    (INLINE, NATIVE, PREFIXED) is detected automatically from the tokenizer.
 
     The prompts should already be chat-templated strings (e.g. as returned by
-    tokenizer.apply_chat_template with add_generation_prompt=True). Template style
-    (INLINE, NATIVE, PREFIXED) is detected automatically from the tokenizer.
+    tokenizer.apply_chat_template with add_generation_prompt=True).
 
     Returns a list of prompt strings ready to pass directly to a generation function.
     """
@@ -79,7 +70,7 @@ def steer(
 
 
 def apply_steer_template(
-    conversations: list[list[dict]],
+    conversations: list[list[dict[str, str]]],
     tokenizer: object,
     prefix: SimplePrefix | str | None = None,
     tag: str | None = None,
@@ -90,10 +81,6 @@ def apply_steer_template(
     into a single call. Accepts a list of conversations (each a list of message dicts
     with "role" and "content" keys) and returns steered prompt strings ready for
     generation.
-
-    - prefix=None:   ensures the opening tag is present without seeding the thought
-    - prefix=<str>:  seeds the model's thought with the given string
-    - tag:           override the reasoning tag for INLINE models (see steer())
 
     Returns a list of steered prompt strings, one per conversation.
     """

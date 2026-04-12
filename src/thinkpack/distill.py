@@ -30,11 +30,6 @@ def build_prompts(
     to produce a reasoning trace inside the specified tag. The closing tag
     should be configured as a stop token so the model stops after reasoning.
 
-    - preamble: the opening meta-instruction; pass a custom string to override
-    - tag: the XML tag name used in the prompt and by extract_reasoning()
-    - example: optional sample reasoning trace, shown wrapped in the response
-      tags to demonstrate the expected output format
-
     Returns a list of prompt strings, one per record.
     """
     prompts = []
@@ -88,15 +83,12 @@ def extract_reasoning(
     Extract a reasoning trace from a model response or a list of responses.
 
     Accepts a single string or a list; the return type matches the input.
+    Delegates to parse() for standard think/reasoning/thought tags, including
+    the truncated case where the closing tag is a stop token.
 
-    When tag is None, delegates to parse() which handles the standard think/
-    reasoning/thought family of tags, including truncated responses where the
-    closing tag was used as a stop token and never appears in the output.
-
-    When tag is set (e.g. "reasoning_trace"), finds the custom opening tag and
-    takes everything after it. The closing tag is assumed to be a stop token
-    and will not be present in the output. If strip_think is True, any standard
-    <think> block is stripped first so it does not interfere with extraction.
+    For custom tags (e.g. "reasoning_trace"), finds the opening tag and takes
+    everything after it — the closing tag is assumed to be a stop token and
+    absent from the output.
 
     Returns the extracted reasoning string (or None if not found / blank) for
     a single input, or a list of the same for a list input.

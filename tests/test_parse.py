@@ -75,6 +75,38 @@ class TestParse:
         assert result.has_valid_reasoning is True
 
 
+class TestParseCustomTag:
+    """Tests for parse() with an explicit tag= argument."""
+
+    def test_custom_tag_standard_format(self) -> None:
+        """Custom tag with matching open and close is parsed correctly."""
+        response = "<reasoning>\nsome thoughts\n</reasoning>\nthe answer"
+        result = parse(response=response, tag="reasoning")
+
+        assert result.reasoning_tag == "reasoning"
+        assert result.has_valid_reasoning is True
+        assert result.answer == "the answer"
+        assert result.has_truncated_reasoning is False
+
+    def test_custom_tag_truncated(self) -> None:
+        """Custom tag with open tag but no close tag is marked as truncated."""
+        response = "<reasoning>\nthoughts that never finish"
+        result = parse(response=response, tag="reasoning")
+
+        assert result.reasoning_tag == "reasoning"
+        assert result.has_truncated_reasoning is True
+        assert result.has_valid_reasoning is False
+        assert result.answer == ""
+
+    def test_custom_tag_no_match_returns_plain(self) -> None:
+        """Custom tag not present in response returns a plain answer result."""
+        response = "just a plain answer"
+        result = parse(response=response, tag="reasoning")
+
+        assert result.has_reasoning_block is False
+        assert result.answer == "just a plain answer"
+
+
 class TestParseAll:
     """Tests for the parse_all() batch function."""
 
