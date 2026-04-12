@@ -121,6 +121,66 @@ Recognises tag variants: `think`, `thinking`, `reasoning`, `thought` (case-insen
 
 ---
 
+### `thinkpack.distill` — Distillation prompt building and reasoning extraction
+
+When training data lacks reasoning traces, `distill` helps construct them. It builds prompts that ask a teacher model to produce a reasoning trace given a question and its known answer, then extracts and writes those traces back into your records.
+
+```python
+import thinkpack
+
+# build prompts for a teacher model to generate reasoning traces
+prompts = thinkpack.build_prompts(
+    records=records,  # list of dicts with "instruction" and "response" keys
+)
+
+# after generating responses from the teacher model, extract the traces
+traces = thinkpack.extract_reasoning(text=responses, tag="reasoning_trace")
+
+# or write traces back into records in one step
+records = thinkpack.update_records(
+    records=records,
+    responses=responses,
+    field="reasoning",  # key to write extracted traces into
+)
+```
+
+`extract_reasoning` accepts a single string or a list, and returns `None` where extraction fails (blank or no tag found):
+
+```python
+# single response — returns str | None
+trace = thinkpack.extract_reasoning(text=response)
+
+# list of responses — returns list[str | None]
+traces = thinkpack.extract_reasoning(text=responses)
+```
+
+---
+
+### `thinkpack.hybrid` — Hybrid decoding
+
+Hybrid decoding separates reasoning from answering across two model variants: the base model generates the reasoning block freely (without fine-tuning influence), and the fine-tuned adapter generates the final answer conditioned on that reasoning. This can improve answer quality when the adapter has partially collapsed.
+
+Requires vLLM with `enable_lora=True`.
+
+```python
+from thinkpack import hybrid_generate, SimplePrefix
+
+# steered_prompts = prompts already ending with an open reasoning tag (from steer())
+results = thinkpack.hybrid_generate(
+    prompts=steered_prompts,
+    llm=llm,                        # vLLM LLM loaded with enable_lora=True
+    lora_request=lora_request,      # adapter used for phase 2
+    sampling_params=sampling_params,
+)
+
+for r in results:
+    r.reasoning  # str — reasoning produced by the base model
+    r.answer     # str — answer produced by the fine-tuned model
+    r.raw        # str — full combined string for convenience
+```
+
+---
+
 ## *development*
 
 Clone the repository code:
