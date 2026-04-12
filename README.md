@@ -199,7 +199,7 @@ python -m venv .venv
 
 pip install uv
 
-uv sync --extra dev
+uv sync
 ```
 
 Use `make` commands to lint and test:

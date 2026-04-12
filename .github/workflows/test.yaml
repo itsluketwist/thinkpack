@@ -32,4 +32,4 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: 3. Run the tests...
-        run: uv run pytest
+        run: uv run --group dev pytest

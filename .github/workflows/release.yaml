@@ -10,7 +10,7 @@ jobs:
 
     environment:
       name: release
-      url: https://pypi.org/p/thinkbox
+      url: https://pypi.org/p/thinkpack
 
     permissions:
       id-token: write

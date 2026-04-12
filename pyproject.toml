@@ -32,7 +32,7 @@ dependencies = [
     "transformers",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pre-commit",
     "pytest",
