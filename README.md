@@ -2,13 +2,14 @@
 
 ![ThinkPack](assets/banner.png)
 
-A lightweight toolkit for working with reasoning blocks when training and evaluating language models
+A lightweight toolkit for working with reasoning blocks when training and evaluating language models.
 
-`thinkpack` provides five modules covering the full reasoning model workflow:
+`thinkpack` provides six modules covering the full reasoning model workflow:
 
 - **[Loss masking](#thinkpackmask--training-time-loss-masking)** (`thinkpack.mask`) — keeps reasoning blocks in the training context while masking them from the loss, so the model doesn't learn to skip them.
 - **[Thought steering](#thinkpacksteer--inference-time-thought-steering)** (`thinkpack.steer`) — injects a short primer after the opening reasoning tag at inference time, nudging the model to reason before answering.
 - **[Response parsing](#thinkpackparse--response-parsing)** (`thinkpack.parse`) — splits raw model output into reasoning and answer components, with flags for truncation detection.
+- **[Response statistics](#thinkpackstats--response-statistics)** (`thinkpack.stats`) — aggregates parsed responses into counts for reasoning presence, validity, truncation, and answer production.
 - **[Reasoning distillation](#thinkpackdistill--distillation-prompt-building-and-reasoning-extraction)** (`thinkpack.distill`) — builds prompts for a teacher model to generate reasoning traces, then extracts and writes them back into your records.
 - **[Hybrid decoding](#thinkpackhybrid--hybrid-decoding)** (`thinkpack.hybrid`) — separates reasoning and answering across a base model and a fine-tuned adapter for improved output quality.
 
@@ -120,6 +121,26 @@ Handles all four output formats:
 | Truncated prefixed | `reasoning...` (pass `prefixed=True`) |
 
 Recognises tag variants: `think`, `thinking`, `reasoning`, `thought` (case-insensitive).
+
+---
+
+### `thinkpack.stats` — Response statistics
+
+After parsing a batch of responses, `stats()` aggregates the results into a `ResponseStats` object with raw counts for each reasoning outcome.
+
+```python
+parsed = thinkpack.parse_all(responses=responses)
+s = thinkpack.stats(responses=parsed)
+
+s.total                    # int — total responses processed
+s.has_reasoning_block      # int — any reasoning block structure detected (even empty or truncated)
+s.has_truncated_reasoning  # int — block opened but never closed
+s.has_empty_reasoning      # int — block opened and closed, but content was blank
+s.has_valid_reasoning      # int — block completed with non-blank content
+s.has_answer               # int — a non-blank answer was produced
+```
+
+All fields are raw counts; divide by `s.total` to get rates. The three reasoning block states (`has_truncated_reasoning`, `has_empty_reasoning`, `has_valid_reasoning`) are mutually exclusive and always sum to `has_reasoning_block`. `stats()` accepts either a flat `list[ParsedResponse]` or the nested `list[list[ParsedResponse]]` shape returned by `parse_all()` — both are flattened before counting.
 
 ---
 
