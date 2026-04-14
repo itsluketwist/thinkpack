@@ -27,6 +27,32 @@ class MockTokenizer:
         return base
 
 
+class MockTokenizerReturningList:
+    """
+    Mock tokenizer whose apply_chat_template returns a list of token ids
+    instead of a string — exercises the tokenizer.decode() fallback path in
+    apply_steer_template (steer.py line 129).
+    """
+
+    # unique chat_template so detect_model() cache entry is separate from MockTokenizer
+    chat_template = "list-returning-mock"
+
+    def apply_chat_template(
+        self,
+        messages: list,
+        tokenize: bool = True,
+        add_generation_prompt: bool = False,
+    ) -> list[int] | str:
+        """Return a list of fake token ids to simulate the unusual tokenizer behaviour."""
+        text = "".join(m["content"] for m in messages)
+        # return list to trigger the isinstance(result, list) branch
+        return [ord(c) for c in text]
+
+    def decode(self, token_ids: list[int]) -> str:
+        """Reconstruct the string from ordinals."""
+        return "".join(chr(t) for t in token_ids)
+
+
 class TestSteerNonePrefix:
     """Tests for steer() with prefix=None — just ensures the reasoning tag is open."""
 
@@ -229,6 +255,18 @@ class TestSteerClose:
         )
 
         assert result[0] == "my prompt<reasoning>\nOkay, \n</reasoning>\n"
+
+    def test_apply_steer_template_decodes_list_result(self) -> None:
+        """apply_steer_template handles tokenizers that return a list from apply_chat_template."""
+        tokenizer = MockTokenizerReturningList()
+        result = apply_steer_template(
+            conversations=[[{"role": "user", "content": "hello"}]],
+            tokenizer=tokenizer,
+            prefix=None,
+        )
+
+        # the decoded string should end with the injected think tag
+        assert "<think>" in result[0]
 
     def test_apply_steer_template_close(self) -> None:
         """apply_steer_template passes close=True through to steer()."""

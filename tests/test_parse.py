@@ -1,6 +1,23 @@
 """Tests for thinkpack.parse — response parsing into reasoning and answer."""
 
-from thinkpack.parse import parse, parse_all
+from typing import cast
+
+from thinkpack.parse import ParsedResponse, parse, parse_all, parse_output
+
+
+class MockCompletion:
+    """Minimal stand-in for a vLLM CompletionOutput (has a .text attribute)."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class MockRequestOutput:
+    """Minimal stand-in for a vLLM RequestOutput (has an .outputs list)."""
+
+    def __init__(self, *texts: str) -> None:
+        # each text becomes one sample/completion in .outputs
+        self.outputs = [MockCompletion(t) for t in texts]
 
 
 class TestParse:
@@ -123,3 +140,59 @@ class TestParseAll:
         assert len(result[1]) == 1
         assert result[0][0].has_valid_reasoning is True
         assert result[1][0].has_reasoning_block is False
+
+
+class TestParseOutput:
+    """Tests for parse_output() — parses vLLM-style generation output objects."""
+
+    def test_single_output_single_sample(self) -> None:
+        """A single RequestOutput with one completion returns a flat list."""
+        output = MockRequestOutput("<think>\nr\n</think>\nthe answer")
+        result = cast(list[ParsedResponse], parse_output(output=output))
+
+        assert len(result) == 1
+        assert result[0].answer == "the answer"
+        assert result[0].has_valid_reasoning is True
+
+    def test_single_output_multiple_samples(self) -> None:
+        """A single RequestOutput with multiple completions returns a flat list."""
+        output = MockRequestOutput(
+            "<think>\nr1\n</think>\na1",
+            "<think>\nr2\n</think>\na2",
+        )
+        result = cast(list[ParsedResponse], parse_output(output=output))
+
+        assert len(result) == 2
+        assert result[0].answer == "a1"
+        assert result[1].answer == "a2"
+
+    def test_list_of_outputs_returns_nested_list(self) -> None:
+        """A list of RequestOutputs returns a nested [task][sample] structure."""
+        outputs = [
+            MockRequestOutput("<think>\nr\n</think>\na1"),
+            MockRequestOutput("plain answer"),
+        ]
+        result = cast(list[list[ParsedResponse]], parse_output(output=outputs))
+
+        assert len(result) == 2
+        # each inner list contains the samples for one task
+        assert result[0][0].has_valid_reasoning is True
+        assert result[1][0].has_reasoning_block is False
+
+    def test_prefixed_flag_forwarded(self) -> None:
+        """The prefixed flag is passed through to parse() for each completion."""
+        # prefixed=True treats the whole text as a truncated think block when no tags
+        output = MockRequestOutput("reasoning without close tag")
+        result = cast(list[ParsedResponse], parse_output(output=output, prefixed=True))
+
+        assert result[0].has_truncated_reasoning is True
+
+    def test_tag_forwarded(self) -> None:
+        """The tag argument is passed through to parse() for each completion."""
+        output = MockRequestOutput("<reasoning>\nthoughts\n</reasoning>\nans")
+        result = cast(
+            list[ParsedResponse], parse_output(output=output, tag="reasoning")
+        )
+
+        assert result[0].reasoning_tag == "reasoning"
+        assert result[0].has_valid_reasoning is True
