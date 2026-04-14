@@ -12,7 +12,7 @@ A lightweight toolkit for working with reasoning blocks when training and evalua
 - 🔮 ***Inference:***
     - **[Thought steering](#thinkpacksteer--inference-time-thought-steering)** (`thinkpack.steer`) — injects a short primer after the opening reasoning tag at inference time, nudging the model to reason before answering.
     - **[Hybrid decoding](#thinkpackhybrid--hybrid-decoding)** (`thinkpack.hybrid`) — separates reasoning and answering across a base model and a fine-tuned adapter for improved output quality.
-- 🎒 ***Analysis:***
+- 🔬 ***Analysis:***
     - **[Response parsing](#thinkpackparse--response-parsing)** (`thinkpack.parse`) — splits raw model output into reasoning and answer components, with flags for truncation detection.
     - **[Response statistics](#thinkpackstats--response-statistics)** (`thinkpack.stats`) — aggregates parsed responses into counts for reasoning presence, validity, truncation, and answer production.
 
@@ -20,7 +20,7 @@ A lightweight toolkit for working with reasoning blocks when training and evalua
 
 ## *installation*
 
-Install directly from PyPI:
+Requires [Python 3.11+](https://www.python.org/), install directly from [PyPI](https://pypi.org/project/thinkpack/):
 
 ```bash
 pip install thinkpack
