@@ -2,6 +2,10 @@
 
 ![ThinkPack](assets/banner.png)
 
+[![lint](https://github.com/itsluketwist/thinkpack/actions/workflows/lint.yaml/badge.svg)](https://github.com/itsluketwist/thinkpack/actions/workflows/lint.yaml)
+[![test](https://github.com/itsluketwist/thinkpack/actions/workflows/test.yaml/badge.svg)](https://github.com/itsluketwist/thinkpack/actions/workflows/test.yaml)
+[![release](https://github.com/itsluketwist/thinkpack/actions/workflows/release.yaml/badge.svg)](https://github.com/itsluketwist/thinkpack/actions/workflows/release.yaml)
+
 A lightweight toolkit for working with reasoning blocks when training and evaluating language models.
 
 `thinkpack` provides six modules covering the full reasoning model workflow:
