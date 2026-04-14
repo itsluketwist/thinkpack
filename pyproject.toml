@@ -41,8 +41,14 @@ dev = [
     "uv",
 ]
 
+[project.scripts]
+thinkpack = "thinkpack.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/itsluketwist/thinkpack"
+
+[tool.setuptools.package-data]
+"thinkpack.data" = ["llms.txt"]
 
 [tool.uv]
 exclude-newer = "7 days"

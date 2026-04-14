@@ -20,3 +20,6 @@ test:
 
 coverage:
 	pytest --cov=src/ tests/
+
+bundle:
+	cp llms.txt src/thinkpack/data/llms.txt

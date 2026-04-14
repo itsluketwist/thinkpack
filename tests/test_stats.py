@@ -68,10 +68,10 @@ class TestStats:
     def test_mixed_batch_flat(self) -> None:
         """Counts are correct across a mixed flat list of parsed responses."""
         responses = [
-            _valid(),         # reasoning block, valid reasoning, answer
-            _truncated(),     # reasoning block, truncated, no answer
-            _empty_block(),   # reasoning block, empty, answer
-            _plain(),         # no block, plain answer
+            _valid(),  # reasoning block, valid reasoning, answer
+            _truncated(),  # reasoning block, truncated, no answer
+            _empty_block(),  # reasoning block, empty, answer
+            _plain(),  # no block, plain answer
         ]
         result = stats(responses=responses)
 
@@ -136,7 +136,9 @@ class TestStats:
         result = stats(responses=responses)
 
         assert (
-            result.has_truncated_reasoning + result.has_empty_reasoning + result.has_valid_reasoning
+            result.has_truncated_reasoning
+            + result.has_empty_reasoning
+            + result.has_valid_reasoning
             == result.has_reasoning_block
         )
 

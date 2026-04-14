@@ -1,0 +1,122 @@
+# ThinkPack
+
+> Python utilities for working with reasoning models — a unified API for distilling, training, steering, parsing, and analysing responses across models with different reasoning block styles.
+
+`thinkpack` provides six modules covering the full reasoning model workflow.
+Install from PyPI:
+
+```
+pip install thinkpack
+```
+
+## What are reasoning blocks?
+
+Reasoning models produce structured outputs that interleave a private reasoning block with the final answer, typically using XML-style tags:
+
+```
+<think>step-by-step reasoning...</think>
+final answer
+```
+
+Different models expose this differently, and `thinkpack` abstracts over all three styles automatically — no manual configuration needed.
+
+## Template styles
+
+`TemplateStyle` (a `StrEnum`) describes how a model's chat template handles reasoning:
+
+- `INLINE` — standard style; model generates `<think>content</think>answer`
+- `NATIVE` — model accepts a dedicated `reasoning_content` field in the message dict (Qwen3)
+- `PREFIXED` — chat template auto-injects the opening tag at the end of the generation prompt, so the model only generates `content</think>answer` (OLMo-3)
+
+`detect_model(tokenizer)` detects the style by rendering a test message and inspecting the output — it does not parse the template source. Results are cached by `tokenizer.chat_template`.
+
+## Module overview
+
+| Module | Purpose |
+|---|---|
+| `thinkpack.mask` | Format training records into a pretokenized HuggingFace dataset with configurable loss masking |
+| `thinkpack.distill` | Build prompts for teacher-model reasoning trace generation; extract and write traces back into records |
+| `thinkpack.steer` | Inject a thought-steering prefix after the opening reasoning tag at inference time |
+| `thinkpack.hybrid` | Two-phase decoding: base model generates reasoning, fine-tuned adapter generates the answer |
+| `thinkpack.parse` | Split raw model output into `reasoning` and `answer`, with flags for truncation and validity |
+| `thinkpack.stats` | Aggregate a batch of `ParsedResponse` objects into counts by reasoning outcome |
+
+## Typical workflow
+
+```
+distill  →  mask  →  train  →  steer  →  generate  →  parse  →  stats
+```
+
+1. **distill** — if training data lacks reasoning traces, generate them from a teacher model
+2. **mask** — tokenize records into a dataset; exclude the reasoning block from the loss
+3. **train** — standard SFT with the masked dataset (use any trainer)
+4. **steer** — at inference time, seed the model's thought with a short prefix
+5. **parse** — split raw outputs into structured components
+6. **stats** — count reasoning rates across a batch for evaluation
+
+## Public API
+
+All exports are available directly from `thinkpack`:
+
+```python
+import thinkpack
+
+# model detection
+thinkpack.detect_model(tokenizer)       # -> ModelInfo
+thinkpack.ModelInfo                     # dataclass: style, open_tag
+thinkpack.TemplateStyle                 # StrEnum: INLINE | NATIVE | PREFIXED
+
+# training
+thinkpack.mask(records, tokenizer, masked=thinkpack.Mask.THINK)  # -> Dataset
+thinkpack.Mask                          # IntFlag: PROMPT | THINK | RESPONSE
+
+# distillation
+thinkpack.build_prompts(records)        # -> list[str]
+thinkpack.extract_reasoning(text, tag)  # -> str | None  (or list when text is a list)
+thinkpack.update_records(records, responses, field="reasoning")  # -> list[dict]
+
+# steering
+thinkpack.steer(prompts, tokenizer, prefix=thinkpack.SimplePrefix.CONCISE)  # -> list[str]
+thinkpack.apply_steer_template(conversations, tokenizer, prefix=...)        # -> list[str]
+thinkpack.SimplePrefix                  # StrEnum: BRIEF | STEPS | CONCISE
+
+# parsing
+thinkpack.parse(response)               # -> ParsedResponse
+thinkpack.parse_all(responses)          # -> list[list[ParsedResponse]]
+thinkpack.parse_output(output)          # -> list[ParsedResponse] | list[list[...]]
+thinkpack.ParsedResponse                # dataclass: answer, reasoning, has_valid_reasoning, ...
+
+# statistics
+thinkpack.stats(responses)              # -> ResponseStats
+thinkpack.ResponseStats                 # dataclass: total, has_valid_reasoning, ...
+
+# hybrid decoding
+thinkpack.hybrid_generate(prompts, llm, lora_request, sampling_params)  # -> list[HybridResult]
+thinkpack.HybridResult                  # dataclass: reasoning, answer, raw
+```
+
+## Docs
+
+- [Public API exports](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/__init__.py): all public names in `__all__`
+- [mask.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/mask.py): loss masking — `Mask` flag, `mask()` function, template-aware tokenization
+- [distill.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/distill.py): distillation — `build_prompts()`, `extract_reasoning()`, `update_records()`
+- [steer.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/steer.py): inference steering — `SimplePrefix`, `steer()`, `apply_steer_template()`
+- [parse.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/parse.py): response parsing — `ParsedResponse`, `parse()`, `parse_all()`, `parse_output()`
+- [stats.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/stats.py): statistics — `ResponseStats`, `stats()`
+- [hybrid.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/hybrid.py): hybrid decoding — `HybridResult`, `hybrid_generate()`
+- [_model.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/_model.py): model detection — `TemplateStyle`, `ModelInfo`, `detect_model()`
+
+## Examples
+
+- [examples/training.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/examples/training.py): complete SFT training loop using `mask()` and HuggingFace Trainer
+- [examples/inference.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/examples/inference.py): full inference pipeline using `steer()`, vLLM, `parse_output()`, and `stats()`
+
+## Optional
+
+- [tests/test_parse.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/tests/test_parse.py): parsing tests covering all four response formats
+- [tests/test_stats.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/tests/test_stats.py): stats aggregation tests
+- [tests/test_distill.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/tests/test_distill.py): distillation extraction and record update tests
+- [tests/test_steer.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/tests/test_steer.py): steering injection tests across template styles
+- [tests/test_hybrid.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/tests/test_hybrid.py): hybrid decoding tests
+- [pyproject.toml](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/pyproject.toml): package metadata and dependencies
+- [README.md](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/README.md): narrative documentation with per-module code examples

@@ -59,7 +59,9 @@ def stats(
         has_truncated_reasoning=sum(r.has_truncated_reasoning for r in flat),
         # block opened and closed, but content was whitespace-only
         has_empty_reasoning=sum(
-            r.has_reasoning_block and not r.has_valid_reasoning and not r.has_truncated_reasoning
+            r.has_reasoning_block
+            and not r.has_valid_reasoning
+            and not r.has_truncated_reasoning
             for r in flat
         ),
         # completed reasoning block with non-blank content
