@@ -1,11 +1,25 @@
 """Parsing of model responses into reasoning and answer components."""
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import cast
+from typing import Protocol, cast
 
 from thinkpack._tags import CLOSE_TAG as _REASONING_CLOSE_TAG
 from thinkpack._tags import OPEN_TAG as _REASONING_OPEN_TAG
+
+
+class _Completion(Protocol):
+    """Minimal protocol for a vLLM-compatible generation completion."""
+
+    text: str
+
+
+class _GenerationOutput(Protocol):
+    """Minimal protocol for a vLLM-compatible generation output (e.g. RequestOutput)."""
+
+    # sequence (not list) so structurally-typed mocks returning list[T] satisfy this
+    outputs: Sequence[_Completion]
 
 
 @dataclass
@@ -137,7 +151,7 @@ def parse_all(
 
 
 def parse_output(
-    output: object | list[object],
+    output: _GenerationOutput | list[_GenerationOutput],
     prefixed: bool = False,
     tag: str | None = None,
 ) -> list[ParsedResponse] | list[list[ParsedResponse]]:
@@ -157,12 +171,16 @@ def parse_output(
     """
     if isinstance(output, list):
         # list of output objects — recurse to produce a nested [task][sample] structure
+        # cast needed: isinstance(x, list) narrows to list[object], losing the element type
         return cast(
             list[list[ParsedResponse]],
-            [parse_output(output=o, prefixed=prefixed, tag=tag) for o in output],
+            [
+                parse_output(output=o, prefixed=prefixed, tag=tag)
+                for o in cast(list[_GenerationOutput], output)
+            ],
         )
     # single output object — parse each completion in its .outputs attribute
-    completions = output.outputs  # type: ignore
+    completions = output.outputs
     return [
         parse(
             response=completion.text,

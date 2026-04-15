@@ -1,9 +1,11 @@
 """Tests for thinkpack.hybrid — hybrid decoding with base model reasoning."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from thinkpack.hybrid import HybridResult, hybrid_generate
+from thinkpack.parse import _GenerationOutput
 
 
 @dataclass
@@ -40,12 +42,15 @@ class MockLLM:
         prompts: list[str],
         sampling_params: Any,
         lora_request: Any = None,
-    ) -> list[MockRequestOutput]:
+    ) -> Sequence[_GenerationOutput]:
         """Record the call and return the next batch of mock responses."""
         self.calls.append((prompts, lora_request))
         texts = self._responses[self._call_index]
         self._call_index += 1
-        return [MockRequestOutput(outputs=[MockCompletion(text=t)]) for t in texts]
+        return cast(
+            Sequence[_GenerationOutput],
+            [MockRequestOutput(outputs=[MockCompletion(text=t)]) for t in texts],
+        )
 
 
 class TestHybridGenerate:

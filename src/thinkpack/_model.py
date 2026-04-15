@@ -3,6 +3,33 @@
 import re
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Protocol
+
+
+class _Tokenizer(Protocol):
+    """Minimal protocol for a HuggingFace-compatible tokenizer."""
+
+    chat_template: str | None
+
+    def apply_chat_template(
+        self,
+        conversation: list[dict[str, str]],
+        tokenize: bool = ...,
+        add_generation_prompt: bool = ...,
+    ) -> str | list[int]: ...
+
+    def encode(
+        self,
+        text: str,
+        add_special_tokens: bool = ...,
+        truncation: bool = ...,
+        max_length: int = ...,
+    ) -> list[int]: ...
+
+    def decode(
+        self,
+        token_ids: list[int],
+    ) -> str: ...
 
 
 class TemplateStyle(StrEnum):
@@ -52,7 +79,7 @@ _TRAILING_TAG = re.compile(r"<([a-zA-Z][a-zA-Z0-9_]*)>\s*$")
 _cache: dict[str, ModelInfo] = {}
 
 
-def detect_model(tokenizer: object) -> ModelInfo:
+def detect_model(tokenizer: _Tokenizer) -> ModelInfo:
     """
     Detect how a tokenizer handles reasoning blocks from its chat template.
 
@@ -62,7 +89,7 @@ def detect_model(tokenizer: object) -> ModelInfo:
 
     Returns a ModelInfo with the detected TemplateStyle and open_tag.
     """
-    template = getattr(tokenizer, "chat_template", "") or ""
+    template = tokenizer.chat_template or ""
     if cached := _cache.get(template):
         return cached
 
@@ -70,7 +97,7 @@ def detect_model(tokenizer: object) -> ModelInfo:
     # with a sentinel value — if the sentinel appears in output, the template
     # handles reasoning as a dedicated field rather than inline tags (e.g. Qwen3)
     try:
-        out = tokenizer.apply_chat_template(  # type: ignore
+        out: str | list[int] = tokenizer.apply_chat_template(
             [
                 {"role": "user", "content": ""},
                 {
@@ -83,7 +110,7 @@ def detect_model(tokenizer: object) -> ModelInfo:
             add_generation_prompt=False,
         )
         if isinstance(out, list):
-            out = tokenizer.decode(out)  # type: ignore
+            out = tokenizer.decode(out)
         if _NATIVE_SENTINEL in out:
             # extract the actual tag the template wraps reasoning in, e.g. <think>
             tag_match = re.search(
@@ -99,14 +126,14 @@ def detect_model(tokenizer: object) -> ModelInfo:
 
     # apply with add_generation_prompt=True and check if any xml-like opening tag
     # was appended — if so, this is a PREFIXED model and we capture the tag name
-    gen_prompt = tokenizer.apply_chat_template(  # type: ignore
+    gen_prompt: str | list[int] = tokenizer.apply_chat_template(
         [{"role": "user", "content": ""}],
         tokenize=False,
         add_generation_prompt=True,
     )
     if isinstance(gen_prompt, list):
         # some tokenizers return token ids despite tokenize=False — decode them
-        gen_prompt = tokenizer.decode(gen_prompt)  # type: ignore
+        gen_prompt = tokenizer.decode(gen_prompt)
 
     match = _TRAILING_TAG.search(gen_prompt)
     if match:

@@ -2,7 +2,13 @@
 
 from typing import cast
 
-from thinkpack.parse import ParsedResponse, parse, parse_all, parse_output
+from thinkpack.parse import (
+    ParsedResponse,
+    _GenerationOutput,
+    parse,
+    parse_all,
+    parse_output,
+)
 
 
 class MockCompletion:
@@ -168,10 +174,13 @@ class TestParseOutput:
 
     def test_list_of_outputs_returns_nested_list(self) -> None:
         """A list of RequestOutputs returns a nested [task][sample] structure."""
-        outputs = [
-            MockRequestOutput("<think>\nr\n</think>\na1"),
-            MockRequestOutput("plain answer"),
-        ]
+        outputs = cast(
+            list[_GenerationOutput],
+            [
+                MockRequestOutput("<think>\nr\n</think>\na1"),
+                MockRequestOutput("plain answer"),
+            ],
+        )
         result = cast(list[list[ParsedResponse]], parse_output(output=outputs))
 
         assert len(result) == 2

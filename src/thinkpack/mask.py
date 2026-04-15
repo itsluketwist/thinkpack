@@ -5,7 +5,7 @@ from enum import IntFlag
 
 from datasets import Dataset
 
-from thinkpack._model import TemplateStyle, detect_model
+from thinkpack._model import TemplateStyle, _Tokenizer, detect_model
 
 
 # pytorch's CrossEntropyLoss uses ignore_index=-100 by default, and all major
@@ -71,7 +71,7 @@ def _build_assistant_message(
 
 
 def _tokenize_prefix(
-    tokenizer: object,
+    tokenizer: _Tokenizer,
     text: str,
     max_seq_length: int,
 ) -> int:
@@ -84,7 +84,7 @@ def _tokenize_prefix(
     Returns the number of tokens in the prefix.
     """
     return len(
-        tokenizer.encode(  # type: ignore
+        tokenizer.encode(
             text,
             add_special_tokens=False,
             truncation=True,
@@ -95,7 +95,7 @@ def _tokenize_prefix(
 
 def _tokenize_record(
     record: dict[str, str],
-    tokenizer: object,
+    tokenizer: _Tokenizer,
     style: TemplateStyle,
     open_tag: str,
     max_seq_length: int,
@@ -125,12 +125,18 @@ def _tokenize_record(
             open_tag=open_tag,
         ),
     ]
-    full_text = tokenizer.apply_chat_template(  # type: ignore
+    full_text_raw: str | list[int] = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=False,
     )
-    input_ids = tokenizer.encode(  # type: ignore
+    # some tokenizers return token ids despite tokenize=False — decode them
+    full_text = (
+        tokenizer.decode(full_text_raw)
+        if isinstance(full_text_raw, list)
+        else full_text_raw
+    )
+    input_ids = tokenizer.encode(
         full_text,
         add_special_tokens=False,
         truncation=True,
@@ -194,7 +200,7 @@ def _tokenize_record(
 
 def mask(
     records: list[dict[str, str]],
-    tokenizer: object,
+    tokenizer: _Tokenizer,
     masked: Mask | None = Mask.THINK,
     max_seq_length: int = 32768,
     ignore_index: int = _DEFAULT_IGNORE_INDEX,

@@ -17,17 +17,17 @@ class MockInlineTokenizer:
     """
 
     # unique string so detect_model() cache entry is keyed to this mock only
-    chat_template = "mock-inline-v1"
+    chat_template: str | None = "mock-inline-v1"
 
     def apply_chat_template(
         self,
-        messages: list,
+        conversation: list[dict[str, str]],
         tokenize: bool = True,
         add_generation_prompt: bool = False,
     ) -> str:
         """Return a simple bracketed template; no trailing xml tag (INLINE)."""
         parts = []
-        for m in messages:
+        for m in conversation:
             if m["role"] == "user":
                 parts.append(f"[U]{m['content']}[/U]")
             elif m["role"] == "assistant":
@@ -52,6 +52,10 @@ class MockInlineTokenizer:
             tokens = tokens[:max_length]
         return tokens
 
+    def decode(self, token_ids: list[int]) -> str:
+        """Reverse of character-level encoding."""
+        return "".join(chr(t) for t in token_ids)
+
 
 class MockNativeTokenizer:
     """
@@ -61,17 +65,17 @@ class MockNativeTokenizer:
     detect_model() to identify the NATIVE style via the _NATIVE_SENTINEL probe.
     """
 
-    chat_template = "mock-native-v1"
+    chat_template: str | None = "mock-native-v1"
 
     def apply_chat_template(
         self,
-        messages: list,
+        conversation: list[dict[str, str]],
         tokenize: bool = True,
         add_generation_prompt: bool = False,
     ) -> str:
         """Include reasoning_content inside <think> tags when the field is present."""
         parts = []
-        for m in messages:
+        for m in conversation:
             if m["role"] == "user":
                 parts.append(f"[U]{m['content']}[/U]")
             elif m["role"] == "assistant":
@@ -98,6 +102,10 @@ class MockNativeTokenizer:
             tokens = tokens[:max_length]
         return tokens
 
+    def decode(self, token_ids: list[int]) -> str:
+        """Reverse of character-level encoding."""
+        return "".join(chr(t) for t in token_ids)
+
 
 class MockPrefixedTokenizer:
     """
@@ -110,17 +118,17 @@ class MockPrefixedTokenizer:
     def __init__(self, open_tag: str = "<think>") -> None:
         self._open_tag = open_tag
         # unique string per tag variant so each config gets its own cache entry
-        self.chat_template = f"mock-prefixed-v1 tag={open_tag}"
+        self.chat_template: str | None = f"mock-prefixed-v1 tag={open_tag}"
 
     def apply_chat_template(
         self,
-        messages: list,
+        conversation: list[dict[str, str]],
         tokenize: bool = True,
         add_generation_prompt: bool = False,
     ) -> str:
         """Append open_tag at the end of the generation prompt (PREFIXED style)."""
         parts = []
-        for m in messages:
+        for m in conversation:
             if m["role"] == "user":
                 parts.append(f"[U]{m['content']}[/U]")
             elif m["role"] == "assistant":
@@ -143,6 +151,10 @@ class MockPrefixedTokenizer:
         if truncation:
             tokens = tokens[:max_length]
         return tokens
+
+    def decode(self, token_ids: list[int]) -> str:
+        """Reverse of character-level encoding."""
+        return "".join(chr(t) for t in token_ids)
 
 
 # module-level tokenizer instances — reused across tests so detect_model() only

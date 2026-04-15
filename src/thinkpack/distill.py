@@ -95,7 +95,7 @@ def extract_reasoning(
     """
     if isinstance(text, list):
         return [
-            extract_reasoning(  # type: ignore[misc]
+            extract_reasoning(
                 text=t,
                 tag=tag,
                 prefixed=prefixed,

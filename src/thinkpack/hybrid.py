@@ -5,10 +5,11 @@ Requires vLLM. The LLM must be loaded with enable_lora=True so the adapter
 can be toggled between the two generation phases without reloading the model.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from thinkpack.parse import parse
+from thinkpack.parse import _GenerationOutput, parse
 
 
 class _LLM(Protocol):
@@ -19,7 +20,7 @@ class _LLM(Protocol):
         prompts: list[str],
         sampling_params: Any,
         lora_request: Any = None,
-    ) -> list[Any]: ...
+    ) -> Sequence[_GenerationOutput]: ...
 
 
 @dataclass
@@ -89,7 +90,7 @@ def hybrid_generate(
     # parse reasoning from each phase 1 output (first sample only)
     phase1_parsed = [
         parse(
-            response=output.outputs[0].text,  # type: ignore[union-attr]
+            response=output.outputs[0].text,
             prefixed=prefixed,
         )
         for output in phase1_outputs
@@ -117,7 +118,7 @@ def hybrid_generate(
     # combine reasoning and answer into HybridResult objects
     results = []
     for p1, output in zip(phase1_parsed, phase2_outputs):
-        answer = output.outputs[0].text.strip()  # type: ignore[union-attr]
+        answer = output.outputs[0].text.strip()
         tag = p1.reasoning_tag or "think"
         raw = (
             _build_reasoning_prefix(reasoning=p1.reasoning, tag=tag) + answer

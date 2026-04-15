@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 
-from thinkpack._model import detect_model
+from thinkpack._model import _Tokenizer, detect_model
 
 
 class SimplePrefix(StrEnum):
@@ -26,7 +26,7 @@ class SimplePrefix(StrEnum):
 
 def steer(
     prompts: list[str],
-    tokenizer: object,
+    tokenizer: _Tokenizer,
     prefix: SimplePrefix | str | None = None,
     tag: str | None = None,
     close: bool = False,
@@ -102,7 +102,7 @@ def steer(
 
 def apply_steer_template(
     conversations: list[list[dict[str, str]]],
-    tokenizer: object,
+    tokenizer: _Tokenizer,
     prefix: SimplePrefix | str | None = None,
     tag: str | None = None,
     close: bool = False,
@@ -119,14 +119,14 @@ def apply_steer_template(
     # apply the chat template to each conversation
     templated = []
     for messages in conversations:
-        result = tokenizer.apply_chat_template(  # type: ignore
+        result: str | list[int] = tokenizer.apply_chat_template(
             messages,
             tokenize=False,
             add_generation_prompt=True,
         )
         if isinstance(result, list):
             # some tokenizers return token ids despite tokenize=False — decode them
-            result = tokenizer.decode(result)  # type: ignore
+            result = tokenizer.decode(result)
         templated.append(result)
 
     return steer(

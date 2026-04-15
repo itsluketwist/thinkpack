@@ -12,19 +12,36 @@ class MockTokenizer:
         self._open_tag = open_tag
         # mimic a chat_template string that encodes the prefixed/tag variant so
         # each distinct mock configuration gets its own detect_model() cache entry
-        self.chat_template = f"basic template prefixed={prefixed} open_tag={open_tag}"
+        self.chat_template: str | None = (
+            f"basic template prefixed={prefixed} open_tag={open_tag}"
+        )
 
     def apply_chat_template(
         self,
-        messages: list,
+        conversation: list[dict[str, str]],
         tokenize: bool = True,
         add_generation_prompt: bool = False,
     ) -> str:
         """Return a fake templated prompt, ending with open_tag for PREFIXED style."""
-        base = "".join(m["content"] for m in messages)
+        base = "".join(m["content"] for m in conversation)
         if add_generation_prompt and self._prefixed:
             return f"{base}{self._open_tag}"
         return base
+
+    def encode(
+        self,
+        text: str,
+        add_special_tokens: bool = True,
+        truncation: bool = False,
+        max_length: int = 32768,
+    ) -> list[int]:
+        """Character-level encoding: one token per character."""
+        tokens = [ord(c) % 1000 for c in text]
+        return tokens[:max_length] if truncation else tokens
+
+    def decode(self, token_ids: list[int]) -> str:
+        """Reconstruct the string from ordinals."""
+        return "".join(chr(t) for t in token_ids)
 
 
 class MockTokenizerReturningList:
@@ -35,18 +52,32 @@ class MockTokenizerReturningList:
     """
 
     # unique chat_template so detect_model() cache entry is separate from MockTokenizer
-    chat_template = "list-returning-mock"
+    chat_template: str | None = "list-returning-mock"
 
     def apply_chat_template(
         self,
-        messages: list,
+        conversation: list[dict[str, str]],
         tokenize: bool = True,
         add_generation_prompt: bool = False,
     ) -> list[int] | str:
         """Return a list of fake token ids to simulate the unusual tokenizer behaviour."""
-        text = "".join(m["content"] for m in messages)
+        text = "".join(m["content"] for m in conversation)
         # return list to trigger the isinstance(result, list) branch
         return [ord(c) for c in text]
+
+    def encode(
+        self,
+        text: str,
+        add_special_tokens: bool = True,
+        truncation: bool = False,
+        max_length: int = 32768,
+    ) -> list[int]:
+        """Character-level encoding: one token per character."""
+        return (
+            [ord(c) for c in text][:max_length]
+            if truncation
+            else [ord(c) for c in text]
+        )
 
     def decode(self, token_ids: list[int]) -> str:
         """Reconstruct the string from ordinals."""
