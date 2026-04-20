@@ -1,9 +1,8 @@
 """
-Example: SFT training with think-block loss masking using ThinkPack.
+Example: Naive SFT vs masking-based SFT to prevent reasoning collapse.
 
-This script shows exactly where to insert thinkpack.mask() into a standard
-training loop. The rest is boilerplate transformers — the ThinkPack line
-is marked with a comment.
+Shows the single-line ThinkPack change that prevents reasoning collapse
+during fine-tuning on standard instruction-response data.
 """
 
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
@@ -12,36 +11,46 @@ import thinkpack
 
 # --- load model and tokenizer ---
 
-model_name = "allenai/OLMo-3-1B"
+model_name = "Qwen/Qwen3-8B"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(model_name)
 
 # --- load training records ---
-# each record is a dict with "instruction" and "response" keys;
-# an optional "reasoning" key provides think block content
+# standard instruction-response pairs; no reasoning field required.
+# the model produces <think>...</think> traces at inference, but training data need not include them.
 
 records = [
     {"instruction": "What is 2 + 2?", "response": "4"},
     {"instruction": "Write a haiku about the sea.", "response": "Waves crash on the shore..."},
 ]
 
-# --- ThinkPack: format records with reasoning tokens masked from the loss ---
-# insert this line in place of your existing dataset formatting step.
-# template style (INLINE, NATIVE, PREFIXED) is detected automatically.
-# combine flags to mask multiple sections, e.g. Mask.PROMPT | Mask.THINK
-# to train on the response only.
-train_dataset = thinkpack.mask(
+# --- naive SFT (causes reasoning collapse) ---
+# all tokens contribute to the loss, including any generated <think> blocks.
+# the model learns to skip reasoning, since the response alone minimises loss.
+naive_dataset = thinkpack.mask(
     records=records,
     tokenizer=tokenizer,
-    masked=thinkpack.Mask.THINK,
+    masked=None,  # no masking — naive baseline
+)
+
+# --- masking-based SFT (prevents reasoning collapse) ---
+# the think block is excluded from the loss; the model is not penalised for reasoning.
+# this preserves reasoning behaviour while still training on the response.
+# template style (INLINE, NATIVE, PREFIXED) is detected automatically from the tokenizer.
+masked_dataset = thinkpack.mask(
+    records=records,
+    tokenizer=tokenizer,
+    masked=thinkpack.Mask.THINK,  # mask the think block (core method)
 )
 
 # --- train ---
+# swap naive_dataset for masked_dataset to compare collapse vs no collapse.
+# all other training code is identical — this is the only change.
 
 trainer = Trainer(
     model=model,
     processing_class=tokenizer,
-    train_dataset=train_dataset,
+    train_dataset=masked_dataset,
     args=TrainingArguments(
         output_dir="output/model",
         num_train_epochs=3,

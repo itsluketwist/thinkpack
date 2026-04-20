@@ -168,3 +168,6 @@ cython_debug/
 
 # copied data files
 /src/thinkpack/data/llms.txt
+
+# archived / deprioritised modules
+archive/

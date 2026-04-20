@@ -15,7 +15,7 @@ where = ["src"]
 name = "thinkpack"
 # version = "0.0.0"
 dynamic = ["version"]
-description = "Tools for preventing think collapse in reasoning language models."
+description = "A framework for training, parsing, and evaluating explicit reasoning models — focused on reasoning collapse."
 readme = "README.md"
 authors = [{ name = "Lukas Twist", email = "itsluketwist@gmail.com" }]
 license = { file = "LICENSE" }
@@ -24,7 +24,7 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
 ]
-keywords = ["thinkpack", "llm", "reasoning", "think-collapse", "fine-tuning"]
+keywords = ["thinkpack", "llm", "reasoning", "reasoning-collapse", "fine-tuning", "loss-masking"]
 requires-python = ">=3.11"
 
 dependencies = [
