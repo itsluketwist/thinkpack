@@ -11,6 +11,73 @@ from thinkpack.parse import (
 )
 
 
+# ---------------------------------------------------------------------------
+# mock tokenizers — implement the _Tokenizer protocol without real models
+# ---------------------------------------------------------------------------
+
+
+class _MockTokenizerBase:
+    """Base for mock tokenizers; encode returns one token per character."""
+
+    chat_template: str = ""
+
+    def apply_chat_template(
+        self,
+        conversation: list[dict[str, str]],
+        tokenize: bool = False,
+        add_generation_prompt: bool = False,
+    ) -> str:
+        raise NotImplementedError
+
+    def encode(
+        self,
+        text: str,
+        add_special_tokens: bool = True,
+        truncation: bool = False,
+        max_length: int = 0,
+    ) -> list[int]:
+        # one token per character — makes expected counts trivially verifiable
+        return list(range(len(text)))
+
+    def decode(self, token_ids: list[int]) -> str:
+        return ""
+
+
+class MockPrefixedTokenizer(_MockTokenizerBase):
+    """Simulates a PREFIXED-style tokenizer (e.g. OLMo-3): generation prompt ends with <think>."""
+
+    chat_template = "mock_prefixed_template"
+
+    def apply_chat_template(
+        self,
+        conversation: list[dict[str, str]],
+        tokenize: bool = False,
+        add_generation_prompt: bool = False,
+    ) -> str:
+        # native reasoning_content check raises so detection falls through to PREFIXED
+        if any("reasoning_content" in m for m in conversation):
+            raise ValueError("unsupported field")
+        if add_generation_prompt:
+            return "<|im_start|>assistant\n<think>"
+        return "<|im_start|>assistant\n"
+
+
+class MockInlineTokenizer(_MockTokenizerBase):
+    """Simulates an INLINE-style tokenizer: generation prompt has no trailing tag."""
+
+    chat_template = "mock_inline_template"
+
+    def apply_chat_template(
+        self,
+        conversation: list[dict[str, str]],
+        tokenize: bool = False,
+        add_generation_prompt: bool = False,
+    ) -> str:
+        if any("reasoning_content" in m for m in conversation):
+            raise ValueError("unsupported field")
+        return "<|im_start|>assistant\n"
+
+
 class MockCompletion:
     """Minimal stand-in for a vLLM CompletionOutput (has a .text attribute)."""
 
@@ -205,3 +272,191 @@ class TestParseOutput:
 
         assert result[0].reasoning_tag == "reasoning"
         assert result[0].has_valid_reasoning is True
+
+
+class TestParseEmptyReasoning:
+    """Tests for the has_empty_reasoning flag on ParsedResponse."""
+
+    def test_blank_block_sets_has_empty_reasoning(self) -> None:
+        """A completed but blank reasoning block sets has_empty_reasoning=True."""
+        result = parse(response="<think>\n   \n</think>\nthe answer")
+
+        assert result.has_empty_reasoning is True
+        assert result.has_reasoning_block is True
+        assert result.has_valid_reasoning is False
+        assert result.has_truncated_reasoning is False
+
+    def test_valid_block_clears_has_empty_reasoning(self) -> None:
+        """A completed, non-blank reasoning block sets has_empty_reasoning=False."""
+        result = parse(response="<think>\nsome reasoning\n</think>\nthe answer")
+
+        assert result.has_empty_reasoning is False
+        assert result.has_valid_reasoning is True
+
+    def test_truncated_block_clears_has_empty_reasoning(self) -> None:
+        """A truncated block (no close tag) sets has_empty_reasoning=False."""
+        result = parse(response="<think>\nreasoning that never finished")
+
+        assert result.has_empty_reasoning is False
+        assert result.has_truncated_reasoning is True
+
+    def test_no_block_clears_has_empty_reasoning(self) -> None:
+        """A plain response with no block sets has_empty_reasoning=False."""
+        result = parse(response="just an answer")
+
+        assert result.has_empty_reasoning is False
+        assert result.has_reasoning_block is False
+
+    def test_mutually_exclusive_flags_sum_to_has_reasoning_block(self) -> None:
+        """has_valid + has_truncated + has_empty always equals has_reasoning_block."""
+        responses = [
+            parse(response="<think>\nreasoning\n</think>\nans"),  # valid
+            parse(response="<think>\nstarted..."),  # truncated
+            parse(response="<think>\n\n</think>\nans"),  # empty
+            parse(response="just an answer"),  # no block
+        ]
+        for r in responses:
+            sub_total = (
+                r.has_valid_reasoning
+                + r.has_truncated_reasoning
+                + r.has_empty_reasoning
+            )
+            assert sub_total == r.has_reasoning_block
+
+
+class TestParseTokenizerDetection:
+    """Tests for automatic prefixed detection via the tokenizer argument."""
+
+    def test_prefixed_tokenizer_detects_prefixed_style(self) -> None:
+        """A PREFIXED tokenizer causes tagless output to be treated as truncated."""
+        # no tags in response — without tokenizer this would be a plain answer
+        result = parse(
+            response="reasoning without any tags", tokenizer=MockPrefixedTokenizer()
+        )
+
+        assert result.has_truncated_reasoning is True
+        assert result.has_reasoning_block is True
+        assert result.answer == ""
+
+    def test_inline_tokenizer_treats_tagless_as_plain(self) -> None:
+        """An INLINE tokenizer leaves tagless output as a plain answer."""
+        result = parse(response="just an answer", tokenizer=MockInlineTokenizer())
+
+        assert result.has_reasoning_block is False
+        assert result.answer == "just an answer"
+
+    def test_tokenizer_overrides_explicit_prefixed_false(self) -> None:
+        """A PREFIXED tokenizer overrides prefixed=False passed explicitly."""
+        result = parse(
+            response="reasoning without any tags",
+            prefixed=False,
+            tokenizer=MockPrefixedTokenizer(),
+        )
+
+        assert result.has_truncated_reasoning is True
+
+    def test_tokenizer_overrides_explicit_prefixed_true(self) -> None:
+        """An INLINE tokenizer overrides prefixed=True passed explicitly."""
+        result = parse(
+            response="just an answer",
+            prefixed=True,
+            tokenizer=MockInlineTokenizer(),
+        )
+
+        # INLINE detection means the response is treated as a plain answer, not truncated
+        assert result.has_reasoning_block is False
+        assert result.answer == "just an answer"
+
+    def test_prefixed_tokenizer_forwarded_through_parse_all(self) -> None:
+        """Tokenizer is forwarded to every parse() call inside parse_all()."""
+        responses = [["reasoning with no tags"], ["also no tags"]]
+        result = parse_all(responses=responses, tokenizer=MockPrefixedTokenizer())
+
+        assert result[0][0].has_truncated_reasoning is True
+        assert result[1][0].has_truncated_reasoning is True
+
+    def test_prefixed_tokenizer_forwarded_through_parse_output(self) -> None:
+        """Tokenizer is forwarded to every parse() call inside parse_output()."""
+        output = MockRequestOutput("reasoning with no tags", "also no tags")
+        result = cast(
+            list[ParsedResponse],
+            parse_output(output=output, tokenizer=MockPrefixedTokenizer()),
+        )
+
+        assert result[0].has_truncated_reasoning is True
+        assert result[1].has_truncated_reasoning is True
+
+
+class TestParseCalculateTokens:
+    """Tests for the calculate_tokens argument."""
+
+    def test_token_counts_populated_when_requested(self) -> None:
+        """Token counts are set when calculate_tokens=True and a tokenizer is provided."""
+        response = "<think>\nabc\n</think>\nhi"
+        result = parse(
+            response=response,
+            tokenizer=MockInlineTokenizer(),
+            calculate_tokens=True,
+        )
+
+        # mock encode returns one token per character
+        assert result.reasoning_token_count == len("\nabc\n")
+        assert result.answer_token_count == len("hi")
+
+    def test_token_counts_none_without_tokenizer(self) -> None:
+        """Token counts remain None when calculate_tokens=True but no tokenizer given."""
+        result = parse(
+            response="<think>\nreasoning\n</think>\nthe answer",
+            calculate_tokens=True,
+        )
+
+        assert result.reasoning_token_count is None
+        assert result.answer_token_count is None
+
+    def test_token_counts_none_by_default(self) -> None:
+        """Token counts are None by default even when a tokenizer is provided."""
+        result = parse(
+            response="<think>\nreasoning\n</think>\nthe answer",
+            tokenizer=MockInlineTokenizer(),
+        )
+
+        assert result.reasoning_token_count is None
+        assert result.answer_token_count is None
+
+    def test_token_counts_zero_for_empty_strings(self) -> None:
+        """Empty reasoning or answer produces a token count of zero."""
+        # truncated response has no answer
+        result = parse(
+            response="<think>\nstarted...",
+            tokenizer=MockInlineTokenizer(),
+            calculate_tokens=True,
+        )
+
+        assert result.answer_token_count == 0
+
+    def test_calculate_tokens_forwarded_through_parse_all(self) -> None:
+        """calculate_tokens is forwarded to every parse() call inside parse_all()."""
+        responses = [["<think>\nabc\n</think>\nhi"]]
+        result = parse_all(
+            responses=responses,
+            tokenizer=MockInlineTokenizer(),
+            calculate_tokens=True,
+        )
+
+        assert result[0][0].reasoning_token_count is not None
+        assert result[0][0].answer_token_count is not None
+
+    def test_calculate_tokens_forwarded_through_parse_output(self) -> None:
+        """calculate_tokens is forwarded to every parse() call inside parse_output()."""
+        output = MockRequestOutput("<think>\nabc\n</think>\nhi")
+        result = cast(
+            list[ParsedResponse],
+            parse_output(
+                output=output,
+                tokenizer=MockInlineTokenizer(),
+                calculate_tokens=True,
+            ),
+        )
+
+        assert result[0].reasoning_token_count is not None
+        assert result[0].answer_token_count is not None

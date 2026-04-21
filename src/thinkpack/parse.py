@@ -1,10 +1,12 @@
 """Parsing of model responses into reasoning and answer components."""
 
+import dataclasses
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, cast
 
+from thinkpack._model import TemplateStyle, _Tokenizer, detect_model
 from thinkpack._tags import CLOSE_TAG as _REASONING_CLOSE_TAG
 from thinkpack._tags import OPEN_TAG as _REASONING_OPEN_TAG
 
@@ -55,11 +57,19 @@ class ParsedResponse:
     # true if a reasoning block was opened and closed but its content was blank
     has_empty_reasoning: bool
 
+    # token count of the reasoning content; None if not calculated
+    reasoning_token_count: int | None = None
+
+    # token count of the answer content; None if not calculated
+    answer_token_count: int | None = None
+
 
 def parse(
     response: str,
     prefixed: bool = False,
     tag: str | None = None,
+    tokenizer: _Tokenizer | None = None,
+    calculate_tokens: bool = False,
 ) -> ParsedResponse:
     """Parse a single model response into reasoning and answer components.
 
@@ -69,8 +79,18 @@ def parse(
     - truncated standard: <think>content...      (open tag, no close tag)
     - truncated prefixed: content...             (no tags; only detectable with prefixed=True)
 
+    If a tokenizer is provided, the template style is detected automatically and
+    used to determine whether the model is prefixed — overriding the prefixed arg.
+    If calculate_tokens is True and a tokenizer is provided, reasoning_token_count
+    and answer_token_count are populated on the returned ParsedResponse.
+
     Returns a ParsedResponse with the split content and status flags.
     """
+    # auto-detect prefixed from tokenizer if provided, rather than relying on
+    # the caller to know the model's template style
+    if tokenizer is not None:
+        prefixed = detect_model(tokenizer).style == TemplateStyle.PREFIXED
+
     # compile tag-specific patterns if the caller has specified an exact tag name,
     # otherwise fall back to the shared patterns that match all known variants
     if tag is not None:
@@ -91,7 +111,7 @@ def parse(
         thinking = open_re.sub("", before_close, count=1)
         answer = response[close_match.end() :].strip()
         has_valid_reasoning = bool(thinking.strip())
-        return ParsedResponse(
+        result = ParsedResponse(
             answer=answer,
             reasoning=thinking,
             reasoning_tag=tag_name,
@@ -101,11 +121,9 @@ def parse(
             has_empty_reasoning=not has_valid_reasoning,
         )
 
-    # no closing tag — check for a truncated reasoning block (open tag present)
-    open_match = open_re.search(response)
-    if open_match:
+    elif open_match := open_re.search(response):
         # model started reasoning but output was cut off before the close tag
-        return ParsedResponse(
+        result = ParsedResponse(
             answer="",
             reasoning=response[open_match.end() :],
             reasoning_tag=open_match.group(1).lower(),
@@ -115,11 +133,11 @@ def parse(
             has_empty_reasoning=False,
         )
 
-    if prefixed:
+    elif prefixed:
         # for PREFIXED template models the opening tag is injected by the chat
         # template and never appears in decoded output — a missing close tag means
         # the reasoning was truncated, not that there was no think block at all
-        return ParsedResponse(
+        result = ParsedResponse(
             answer="",
             reasoning=response,
             reasoning_tag=None,
@@ -129,32 +147,59 @@ def parse(
             has_empty_reasoning=False,
         )
 
-    # no reasoning tags at all — plain response with no think block
-    return ParsedResponse(
-        answer=response,
-        reasoning="",
-        reasoning_tag=None,
-        has_reasoning_block=False,
-        has_valid_reasoning=False,
-        has_truncated_reasoning=False,
-        has_empty_reasoning=False,
-    )
+    else:
+        # no reasoning tags at all — plain response with no think block
+        result = ParsedResponse(
+            answer=response,
+            reasoning="",
+            reasoning_tag=None,
+            has_reasoning_block=False,
+            has_valid_reasoning=False,
+            has_truncated_reasoning=False,
+            has_empty_reasoning=False,
+        )
+
+    # compute token counts if requested and a tokenizer is available
+    if calculate_tokens and tokenizer is not None:
+        result = dataclasses.replace(
+            result,
+            reasoning_token_count=len(
+                tokenizer.encode(result.reasoning, add_special_tokens=False)
+            ),
+            answer_token_count=len(
+                tokenizer.encode(result.answer, add_special_tokens=False)
+            ),
+        )
+
+    return result
 
 
 def parse_all(
     responses: list[list[str]],
     prefixed: bool = False,
     tag: str | None = None,
+    tokenizer: _Tokenizer | None = None,
+    calculate_tokens: bool = False,
 ) -> list[list[ParsedResponse]]:
     """Parse a batch of model responses into ParsedResponse objects.
 
     Accepts a nested list of shape [task][sample] and returns the same shape.
     Pass tag to restrict matching to a single tag name (see parse() for details).
+    Pass a tokenizer to auto-detect prefixed and optionally calculate token counts.
 
     Returns a nested list of ParsedResponse objects matching the input shape.
     """
     return [
-        [parse(response=r, prefixed=prefixed, tag=tag) for r in sample_responses]
+        [
+            parse(
+                response=r,
+                prefixed=prefixed,
+                tag=tag,
+                tokenizer=tokenizer,
+                calculate_tokens=calculate_tokens,
+            )
+            for r in sample_responses
+        ]
         for sample_responses in responses
     ]
 
@@ -163,6 +208,8 @@ def parse_output(
     output: _GenerationOutput | list[_GenerationOutput],
     prefixed: bool = False,
     tag: str | None = None,
+    tokenizer: _Tokenizer | None = None,
+    calculate_tokens: bool = False,
 ) -> list[ParsedResponse] | list[list[ParsedResponse]]:
     """Parse one or more generation output objects into ParsedResponse objects.
 
@@ -175,6 +222,7 @@ def parse_output(
     compatible with vLLM's RequestOutput and similar interfaces.
 
     Pass tag to restrict matching to a single tag name (see parse() for details).
+    Pass a tokenizer to auto-detect prefixed and optionally calculate token counts.
 
     Returns a list of ParsedResponse (single output) or list[list[ParsedResponse]] (list).
     """
@@ -184,7 +232,13 @@ def parse_output(
         return cast(
             list[list[ParsedResponse]],
             [
-                parse_output(output=o, prefixed=prefixed, tag=tag)
+                parse_output(
+                    output=o,
+                    prefixed=prefixed,
+                    tag=tag,
+                    tokenizer=tokenizer,
+                    calculate_tokens=calculate_tokens,
+                )
                 for o in cast(list[_GenerationOutput], output)
             ],
         )
@@ -195,6 +249,8 @@ def parse_output(
             response=completion.text,
             prefixed=prefixed,
             tag=tag,
+            tokenizer=tokenizer,
+            calculate_tokens=calculate_tokens,
         )
         for completion in completions
     ]
