@@ -18,6 +18,7 @@ def _valid(answer: str = "the answer") -> ParsedResponse:
         has_reasoning_block=True,
         has_valid_reasoning=True,
         has_truncated_reasoning=False,
+        has_empty_reasoning=False,
     )
 
 
@@ -30,6 +31,7 @@ def _truncated() -> ParsedResponse:
         has_reasoning_block=True,
         has_valid_reasoning=False,
         has_truncated_reasoning=True,
+        has_empty_reasoning=False,
     )
 
 
@@ -42,6 +44,7 @@ def _empty_block(answer: str = "the answer") -> ParsedResponse:
         has_reasoning_block=True,
         has_valid_reasoning=False,
         has_truncated_reasoning=False,
+        has_empty_reasoning=True,
     )
 
 
@@ -54,6 +57,7 @@ def _plain(answer: str = "just an answer") -> ParsedResponse:
         has_reasoning_block=False,
         has_valid_reasoning=False,
         has_truncated_reasoning=False,
+        has_empty_reasoning=False,
     )
 
 

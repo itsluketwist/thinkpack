@@ -29,6 +29,8 @@ class ParsedResponse:
 
     answer and reasoning contain the extracted text; the boolean flags
     describe the structure of the reasoning block at a glance.
+    has_truncated_reasoning, has_empty_reasoning, and has_valid_reasoning are
+    mutually exclusive and sum to has_reasoning_block.
     """
 
     # the model's final answer — text after the closing reasoning tag, or the
@@ -49,6 +51,9 @@ class ParsedResponse:
 
     # true if an opening tag was found but the model never produced a closing tag
     has_truncated_reasoning: bool
+
+    # true if a reasoning block was opened and closed but its content was blank
+    has_empty_reasoning: bool
 
 
 def parse(
@@ -93,6 +98,7 @@ def parse(
             has_reasoning_block=True,
             has_valid_reasoning=has_valid_reasoning,
             has_truncated_reasoning=False,
+            has_empty_reasoning=not has_valid_reasoning,
         )
 
     # no closing tag — check for a truncated reasoning block (open tag present)
@@ -106,6 +112,7 @@ def parse(
             has_reasoning_block=True,
             has_valid_reasoning=False,
             has_truncated_reasoning=True,
+            has_empty_reasoning=False,
         )
 
     if prefixed:
@@ -119,6 +126,7 @@ def parse(
             has_reasoning_block=True,
             has_valid_reasoning=False,
             has_truncated_reasoning=True,
+            has_empty_reasoning=False,
         )
 
     # no reasoning tags at all — plain response with no think block
@@ -129,6 +137,7 @@ def parse(
         has_reasoning_block=False,
         has_valid_reasoning=False,
         has_truncated_reasoning=False,
+        has_empty_reasoning=False,
     )
 
 

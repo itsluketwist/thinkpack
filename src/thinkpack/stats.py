@@ -58,12 +58,7 @@ def stats(
         # block started but the model never produced a closing tag
         has_truncated_reasoning=sum(r.has_truncated_reasoning for r in flat),
         # block opened and closed, but content was whitespace-only
-        has_empty_reasoning=sum(
-            r.has_reasoning_block
-            and not r.has_valid_reasoning
-            and not r.has_truncated_reasoning
-            for r in flat
-        ),
+        has_empty_reasoning=sum(r.has_empty_reasoning for r in flat),
         # completed reasoning block with non-blank content
         has_valid_reasoning=sum(r.has_valid_reasoning for r in flat),
         # a non-blank answer was produced after the reasoning block
