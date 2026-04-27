@@ -167,7 +167,7 @@ class TestGetModelInfo:
 
     def test_raw_tag_override_qwen3(self, qwen3_tokenizer) -> None:
         """Raw tag override on an inline model — tag_content changes, other fields unchanged."""
-        result = get_model_info(tokenizer=qwen3_tokenizer, tag="reasoning")
+        result = get_model_info(tokenizer=qwen3_tokenizer, override_tag="reasoning")
 
         assert result.prefixed is False
         assert result.tag_content == "reasoning"
@@ -176,7 +176,9 @@ class TestGetModelInfo:
 
     def test_raw_tag_override_deepseek(self, deepseek_r1_llama_tokenizer) -> None:
         """Raw tag override on a prefixed model — prefixed=True is preserved."""
-        result = get_model_info(tokenizer=deepseek_r1_llama_tokenizer, tag="reasoning")
+        result = get_model_info(
+            tokenizer=deepseek_r1_llama_tokenizer, override_tag="reasoning"
+        )
 
         assert result.prefixed is True
         assert result.tag_content == "reasoning"
@@ -185,7 +187,7 @@ class TestGetModelInfo:
 
     def test_bracket_tag_override_qwen3(self, qwen3_tokenizer) -> None:
         """[TAG] override switches an HTML model to BRACKET style."""
-        result = get_model_info(tokenizer=qwen3_tokenizer, tag="[THINK]")
+        result = get_model_info(tokenizer=qwen3_tokenizer, override_tag="[THINK]")
 
         assert result.prefixed is False
         assert result.tag_content == "THINK"
@@ -194,7 +196,7 @@ class TestGetModelInfo:
 
     def test_bracket_tag_override_olmo3(self, olmo3_tokenizer) -> None:
         """[TAG] override switches a prefixed HTML model to BRACKET style."""
-        result = get_model_info(tokenizer=olmo3_tokenizer, tag="[THINK]")
+        result = get_model_info(tokenizer=olmo3_tokenizer, override_tag="[THINK]")
 
         assert result.prefixed is True
         assert result.tag_content == "THINK"
@@ -203,7 +205,7 @@ class TestGetModelInfo:
 
     def test_html_tag_override_ministral(self, ministral_tokenizer) -> None:
         """<tag> override switches a BRACKET model to HTML style."""
-        result = get_model_info(tokenizer=ministral_tokenizer, tag="<think>")
+        result = get_model_info(tokenizer=ministral_tokenizer, override_tag="<think>")
 
         assert result.prefixed is False
         assert result.tag_content == "think"
@@ -212,7 +214,7 @@ class TestGetModelInfo:
 
     def test_tag_override_does_not_corrupt_cache(self, qwen3_tokenizer) -> None:
         """Tag overrides are not stored in the cache — detected values remain intact."""
-        _ = get_model_info(tokenizer=qwen3_tokenizer, tag="reasoning")
+        _ = get_model_info(tokenizer=qwen3_tokenizer, override_tag="reasoning")
         result = get_model_info(tokenizer=qwen3_tokenizer)
 
         assert result.prefixed is False

@@ -2,7 +2,7 @@
 
 import logging
 
-from thinkpack.chat import apply_chat_template
+from thinkpack.chat import apply_chat_template, apply_chat_templates
 from thinkpack.mask import MaskType, mask
 from thinkpack.model import ModelInfo, TagStyle, detect_model, get_model_info
 from thinkpack.parse import ParsedResponse, parse, parse_all, parse_output
@@ -27,4 +27,5 @@ __all__ = [
     "ResponseStats",
     "compute_stats",
     "apply_chat_template",
+    "apply_chat_templates",
 ]

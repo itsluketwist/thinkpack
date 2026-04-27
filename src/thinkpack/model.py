@@ -201,7 +201,7 @@ def detect_model(tokenizer: _Tokenizer) -> ModelInfo:
 
 def get_model_info(
     tokenizer: _Tokenizer,
-    tag: str | None = None,
+    override_tag: str | None = None,
 ) -> ModelInfo:
     """
     Detect model properties and apply an optional tag override in one call.
@@ -217,6 +217,6 @@ def get_model_info(
     Returns a ModelInfo with the detected properties and any tag override applied.
     """
     model_info = detect_model(tokenizer=tokenizer)
-    if tag is not None:
-        model_info = model_info.with_tag(tag)
+    if override_tag is not None:
+        model_info = model_info.with_tag(override_tag)
     return model_info
