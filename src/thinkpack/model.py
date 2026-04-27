@@ -1,10 +1,14 @@
 """Model template style detection from tokenizer chat templates."""
 
 import dataclasses
+import logging
 import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
+
+
+_logger = logging.getLogger(__name__)
 
 
 class _Tokenizer(Protocol):
@@ -180,6 +184,11 @@ def detect_model(tokenizer: _Tokenizer) -> ModelInfo:
             tag_content = content
             tag_style = style
             break
+    else:
+        _logger.warning(
+            "No known reasoning tag found in the chat template — "
+            "defaulting to <think>. Use the tag= argument to override if needed."
+        )
 
     result = ModelInfo(
         prefixed=prefixed,
