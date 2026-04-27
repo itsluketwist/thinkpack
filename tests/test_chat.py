@@ -123,7 +123,10 @@ class TestQwen3ChatTemplate:
         # build expected by manually embedding the tags in the assistant turn
         modified = [
             {"role": "user", "content": "What is 2+2?"},
-            {"role": "assistant", "content": _embed("4", "two plus two is four", "<think>", "</think>")},
+            {
+                "role": "assistant",
+                "content": _embed("4", "two plus two is four", "<think>", "</think>"),
+            },
             {"role": "user", "content": "And 3+3?"},
         ]
         expected = _base(qwen3_tokenizer, modified).rstrip("\n") + "\n<think>\n"
@@ -131,7 +134,11 @@ class TestQwen3ChatTemplate:
         result = apply_chat_template(
             conversation=[
                 {"role": "user", "content": "What is 2+2?"},
-                {"role": "assistant", "content": "4", "reasoning": "two plus two is four"},
+                {
+                    "role": "assistant",
+                    "content": "4",
+                    "reasoning": "two plus two is four",
+                },
                 {"role": "user", "content": "And 3+3?"},
             ],
             tokenizer=qwen3_tokenizer,
@@ -182,8 +189,7 @@ class TestQwen3ChatTemplate:
             [{"role": "user", "content": "What is 2+2?"}],
         ]
         expected = [
-            _base(qwen3_tokenizer, c).rstrip("\n") + "\n<think>\n"
-            for c in convs
+            _base(qwen3_tokenizer, c).rstrip("\n") + "\n<think>\n" for c in convs
         ]
 
         result = apply_chat_templates(conversations=convs, tokenizer=qwen3_tokenizer)
@@ -291,7 +297,10 @@ class TestOlmo3ChatTemplate:
         """Non-blank reasoning key embeds a complete <think>...</think> block in history."""
         modified = [
             {"role": "user", "content": "What is 2+2?"},
-            {"role": "assistant", "content": _embed("4", "two plus two is four", "<think>", "</think>")},
+            {
+                "role": "assistant",
+                "content": _embed("4", "two plus two is four", "<think>", "</think>"),
+            },
             {"role": "user", "content": "And 3+3?"},
         ]
         expected = _base(olmo3_tokenizer, modified).rstrip("\n")
@@ -299,7 +308,11 @@ class TestOlmo3ChatTemplate:
         result = apply_chat_template(
             conversation=[
                 {"role": "user", "content": "What is 2+2?"},
-                {"role": "assistant", "content": "4", "reasoning": "two plus two is four"},
+                {
+                    "role": "assistant",
+                    "content": "4",
+                    "reasoning": "two plus two is four",
+                },
                 {"role": "user", "content": "And 3+3?"},
             ],
             tokenizer=olmo3_tokenizer,
@@ -350,10 +363,7 @@ class TestOlmo3ChatTemplate:
             [{"role": "user", "content": "What is 2+2?"}],
         ]
         # prefixed model: template already has the tag; default just returns rstripped base
-        expected = [
-            _base(olmo3_tokenizer, c).rstrip("\n")
-            for c in convs
-        ]
+        expected = [_base(olmo3_tokenizer, c).rstrip("\n") for c in convs]
 
         result = apply_chat_templates(conversations=convs, tokenizer=olmo3_tokenizer)
 
@@ -446,7 +456,10 @@ class TestMinistralChatTemplate:
         """Non-blank reasoning key embeds a complete [THINK]...[/THINK] block in history."""
         modified = [
             {"role": "user", "content": "What is 2+2?"},
-            {"role": "assistant", "content": _embed("4", "two plus two is four", "[THINK]", "[/THINK]")},
+            {
+                "role": "assistant",
+                "content": _embed("4", "two plus two is four", "[THINK]", "[/THINK]"),
+            },
             {"role": "user", "content": "And 3+3?"},
         ]
         expected = _base(ministral_tokenizer, modified).rstrip("\n") + "\n[THINK]\n"
@@ -454,7 +467,11 @@ class TestMinistralChatTemplate:
         result = apply_chat_template(
             conversation=[
                 {"role": "user", "content": "What is 2+2?"},
-                {"role": "assistant", "content": "4", "reasoning": "two plus two is four"},
+                {
+                    "role": "assistant",
+                    "content": "4",
+                    "reasoning": "two plus two is four",
+                },
                 {"role": "user", "content": "And 3+3?"},
             ],
             tokenizer=ministral_tokenizer,
@@ -508,8 +525,7 @@ class TestMinistralChatTemplate:
             [{"role": "user", "content": "What is 2+2?"}],
         ]
         expected = [
-            _base(ministral_tokenizer, c).rstrip("\n") + "\n[THINK]\n"
-            for c in convs
+            _base(ministral_tokenizer, c).rstrip("\n") + "\n[THINK]\n" for c in convs
         ]
 
         result = apply_chat_templates(

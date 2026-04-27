@@ -1,126 +1,61 @@
-"""Tests for thinkpack.parse — response parsing into reasoning and answer."""
+"""Tests for thinkpack.parse — response parsing into reasoning and answer.
 
-from typing import cast
+Non-slow tests use explicit ModelInfo instances to avoid needing a tokenizer.
+Slow tests use real tokenizers for Qwen3 (non-prefixed, <think>), OLMo-3
+(prefixed, <think>), and Ministral (non-prefixed, [THINK]).
 
-from thinkpack.parse import (
-    ParsedResponse,
-    _GenerationOutput,
-    parse,
-    parse_all,
-    parse_output,
+Skip slow tests with: pytest --no-slow
+"""
+
+import pytest
+
+from thinkpack.model import ModelInfo, TagStyle, detect_model
+from thinkpack.parse import ParsedResponse, parse
+
+
+# convenience model_info instances shared across non-slow tests
+_THINK = ModelInfo(prefixed=False)
+_THINK_PREFIXED = ModelInfo(prefixed=True)
+_THINKING = ModelInfo(prefixed=False, tag_content="thinking")
+_REASONING = ModelInfo(prefixed=False, tag_content="reasoning")
+_BRACKET_THINK = ModelInfo(
+    prefixed=False, tag_content="THINK", tag_style=TagStyle.BRACKET
 )
 
 
 # ---------------------------------------------------------------------------
-# mock tokenizers — implement the _Tokenizer protocol without real models
+# non-slow unit tests — use explicit ModelInfo to avoid needing a tokenizer
 # ---------------------------------------------------------------------------
 
 
-class _MockTokenizerBase:
-    """Base for mock tokenizers; encode returns one token per character."""
-
-    chat_template: str = ""
-
-    def apply_chat_template(
-        self,
-        conversation: list[dict[str, str]],
-        tokenize: bool = False,
-        add_generation_prompt: bool = False,
-    ) -> str:
-        raise NotImplementedError
-
-    def encode(
-        self,
-        text: str,
-        add_special_tokens: bool = True,
-        truncation: bool = False,
-        max_length: int = 0,
-    ) -> list[int]:
-        # one token per character — makes expected counts trivially verifiable
-        return list(range(len(text)))
-
-    def decode(self, token_ids: list[int]) -> str:
-        return ""
-
-
-class MockPrefixedTokenizer(_MockTokenizerBase):
-    """Simulates a PREFIXED-style tokenizer (e.g. OLMo-3): generation prompt ends with <think>."""
-
-    chat_template = "mock_prefixed_template"
-
-    def apply_chat_template(
-        self,
-        conversation: list[dict[str, str]],
-        tokenize: bool = False,
-        add_generation_prompt: bool = False,
-    ) -> str:
-        # native reasoning_content check raises so detection falls through to PREFIXED
-        if any("reasoning_content" in m for m in conversation):
-            raise ValueError("unsupported field")
-        if add_generation_prompt:
-            return "<|im_start|>assistant\n<think>"
-        return "<|im_start|>assistant\n"
-
-
-class MockInlineTokenizer(_MockTokenizerBase):
-    """Simulates an INLINE-style tokenizer: generation prompt has no trailing tag."""
-
-    chat_template = "mock_inline_template"
-
-    def apply_chat_template(
-        self,
-        conversation: list[dict[str, str]],
-        tokenize: bool = False,
-        add_generation_prompt: bool = False,
-    ) -> str:
-        if any("reasoning_content" in m for m in conversation):
-            raise ValueError("unsupported field")
-        return "<|im_start|>assistant\n"
-
-
-class MockCompletion:
-    """Minimal stand-in for a vLLM CompletionOutput (has a .text attribute)."""
-
-    def __init__(self, text: str) -> None:
-        self.text = text
-
-
-class MockRequestOutput:
-    """Minimal stand-in for a vLLM RequestOutput (has an .outputs list)."""
-
-    def __init__(self, *texts: str) -> None:
-        # each text becomes one sample/completion in .outputs
-        self.outputs = [MockCompletion(t) for t in texts]
-
-
 class TestParse:
-    """Tests for the parse() function."""
+    """Tests for parse() with a single string input."""
 
     def test_standard_format(self) -> None:
         """Standard <think>...</think> format is parsed correctly."""
         response = "<think>\nsome reasoning\n</think>\nthe answer"
-        result = parse(response=response)
+        result = parse(response=response, model_info=_THINK)
 
         assert result.answer == "the answer"
-        assert result.reasoning == "\nsome reasoning\n"
+        assert result.reasoning == "some reasoning"
         assert result.reasoning_tag == "think"
         assert result.has_reasoning_block is True
         assert result.has_valid_reasoning is True
         assert result.has_truncated_reasoning is False
 
     def test_olmo_style_format(self) -> None:
-        """OLMo-style format (no opening tag in output) is parsed correctly."""
-        # olmo models inject <think> via the chat template, so decoded output has no open tag
+        """Close-tag-only format (no opening tag in output) is parsed correctly."""
+        # prefixed models inject <think> via the chat template, so decoded output has no open tag
         response = "some reasoning\n</think>\nthe answer"
-        result = parse(response=response)
+        result = parse(response=response, model_info=_THINK)
 
         assert result.answer == "the answer"
         assert result.has_valid_reasoning is True
 
     def test_plain_response_no_tags(self) -> None:
-        """A response with no reasoning tags is returned as plain answer."""
+        """A response with no reasoning tags is returned as a plain answer."""
         response = "just the answer"
-        result = parse(response=response)
+        result = parse(response=response, model_info=_THINK)
 
         assert result.answer == "just the answer"
         assert result.reasoning == ""
@@ -132,7 +67,7 @@ class TestParse:
     def test_truncated_standard(self) -> None:
         """A response with an open tag but no closing tag is marked as truncated."""
         response = "<think>\nreasoning started but never finis"
-        result = parse(response=response)
+        result = parse(response=response, model_info=_THINK)
 
         assert result.has_reasoning_block is True
         assert result.has_valid_reasoning is False
@@ -140,9 +75,9 @@ class TestParse:
         assert result.answer == ""
 
     def test_truncated_prefixed(self) -> None:
-        """PREFIXED template truncation (no tags at all) is detected with prefixed=True."""
+        """Prefixed model with no tags: treated as truncated reasoning."""
         response = "reasoning started but never finished"
-        result = parse(response=response, prefixed=True)
+        result = parse(response=response, model_info=_THINK_PREFIXED)
 
         assert result.has_reasoning_block is True
         assert result.has_truncated_reasoning is True
@@ -151,7 +86,7 @@ class TestParse:
     def test_empty_reasoning_block(self) -> None:
         """An empty think block is not counted as valid reasoning."""
         response = "<think>\n</think>\nthe answer"
-        result = parse(response=response)
+        result = parse(response=response, model_info=_THINK)
 
         assert result.has_reasoning_block is True
         assert result.has_valid_reasoning is False
@@ -159,19 +94,36 @@ class TestParse:
     def test_thinking_tag_variant(self) -> None:
         """Alternative tag names (thinking, reasoning, thought) are handled."""
         response = "<thinking>\nsome thoughts\n</thinking>\nthe answer"
-        result = parse(response=response)
+        result = parse(response=response, model_info=_THINKING)
 
         assert result.reasoning_tag == "thinking"
         assert result.has_valid_reasoning is True
 
+    def test_no_arg_raises(self) -> None:
+        """Calling parse() without tokenizer or model_info raises ValueError."""
+        with pytest.raises(ValueError, match="tokenizer or model_info"):
+            parse(response="some response")
+
+    def test_valid_answer_true(self) -> None:
+        """valid_answer is True when the answer contains non-whitespace text."""
+        result = parse(response="<think>\nr\n</think>\nthe answer", model_info=_THINK)
+
+        assert result.extracted_answer is True
+
+    def test_valid_answer_false_on_empty(self) -> None:
+        """valid_answer is False when the answer is empty (e.g. truncated response)."""
+        result = parse(response="<think>\nstarted...", model_info=_THINK)
+
+        assert result.extracted_answer is False
+
 
 class TestParseCustomTag:
-    """Tests for parse() with an explicit tag= argument."""
+    """Tests for parse() with explicit non-default ModelInfo tag settings."""
 
     def test_custom_tag_standard_format(self) -> None:
         """Custom tag with matching open and close is parsed correctly."""
         response = "<reasoning>\nsome thoughts\n</reasoning>\nthe answer"
-        result = parse(response=response, tag="reasoning")
+        result = parse(response=response, model_info=_REASONING)
 
         assert result.reasoning_tag == "reasoning"
         assert result.has_valid_reasoning is True
@@ -181,7 +133,7 @@ class TestParseCustomTag:
     def test_custom_tag_truncated(self) -> None:
         """Custom tag with open tag but no close tag is marked as truncated."""
         response = "<reasoning>\nthoughts that never finish"
-        result = parse(response=response, tag="reasoning")
+        result = parse(response=response, model_info=_REASONING)
 
         assert result.reasoning_tag == "reasoning"
         assert result.has_truncated_reasoning is True
@@ -189,89 +141,79 @@ class TestParseCustomTag:
         assert result.answer == ""
 
     def test_custom_tag_no_match_returns_plain(self) -> None:
-        """Custom tag not present in response returns a plain answer result."""
+        """Tag not present in response returns a plain answer result."""
         response = "just a plain answer"
-        result = parse(response=response, tag="reasoning")
+        result = parse(response=response, model_info=_REASONING)
 
         assert result.has_reasoning_block is False
         assert result.answer == "just a plain answer"
 
+    def test_bracket_tag_standard_format(self) -> None:
+        """[THINK]...[/THINK] bracket-style format is parsed correctly."""
+        response = "[THINK]\nsome thoughts\n[/THINK]\nthe answer"
+        result = parse(response=response, model_info=_BRACKET_THINK)
 
-class TestParseAll:
-    """Tests for the parse_all() batch function."""
+        assert result.reasoning_tag == "THINK"
+        assert result.has_valid_reasoning is True
+        assert result.answer == "the answer"
+        assert result.has_truncated_reasoning is False
 
-    def test_basic_batch(self) -> None:
-        """parse_all returns correct shape and contents for a simple batch."""
+    def test_bracket_tag_truncated(self) -> None:
+        """Bracket tag with open but no close is marked as truncated."""
+        response = "[THINK]\nthoughts that never finish"
+        result = parse(response=response, model_info=_BRACKET_THINK)
+
+        assert result.reasoning_tag == "THINK"
+        assert result.has_truncated_reasoning is True
+        assert result.has_valid_reasoning is False
+        assert result.answer == ""
+
+    def test_bracket_tag_no_match_html_response(self) -> None:
+        """Bracket tag model_info but HTML tags in response: treated as plain answer."""
+        response = "<think>\nthoughts\n</think>\nthe answer"
+        result = parse(response=response, model_info=_BRACKET_THINK)
+
+        assert result.has_reasoning_block is False
+        assert result.answer == response
+
+
+class TestParseBatch:
+    """Tests for parse() with list[str] and list[list[str]] inputs."""
+
+    def test_flat_list(self) -> None:
+        """parse() with list[str] returns a flat list of ParsedResponse."""
+        responses = [
+            "<think>\nr1\n</think>\na1",
+            "plain answer",
+        ]
+        result = parse(response=responses, model_info=_THINK)
+
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert isinstance(result[0], ParsedResponse)
+        assert result[0].has_valid_reasoning is True
+        assert result[1].has_reasoning_block is False
+
+    def test_nested_list(self) -> None:
+        """parse() with list[list[str]] returns a nested [task][sample] list."""
         responses = [
             ["<think>\nr1\n</think>\na1", "<think>\nr2\n</think>\na2"],
             ["plain answer"],
         ]
-        result = parse_all(responses=responses)
+        result = parse(response=responses, model_info=_THINK)
 
+        assert isinstance(result, list)
         assert len(result) == 2
-        assert len(result[0]) == 2
-        assert len(result[1]) == 1
-        assert result[0][0].has_valid_reasoning is True
-        assert result[1][0].has_reasoning_block is False
+        assert len(result[0]) == 2  # type: ignore[arg-type]
+        assert len(result[1]) == 1  # type: ignore[arg-type]
+        assert result[0][0].has_valid_reasoning is True  # type: ignore[index]
+        assert result[1][0].has_reasoning_block is False  # type: ignore[index]
 
+    def test_empty_flat_list(self) -> None:
+        """parse() with an empty list returns an empty list."""
+        result = parse(response=[], model_info=_THINK)
 
-class TestParseOutput:
-    """Tests for parse_output() — parses vLLM-style generation output objects."""
-
-    def test_single_output_single_sample(self) -> None:
-        """A single RequestOutput with one completion returns a flat list."""
-        output = MockRequestOutput("<think>\nr\n</think>\nthe answer")
-        result = cast(list[ParsedResponse], parse_output(output=output))
-
-        assert len(result) == 1
-        assert result[0].answer == "the answer"
-        assert result[0].has_valid_reasoning is True
-
-    def test_single_output_multiple_samples(self) -> None:
-        """A single RequestOutput with multiple completions returns a flat list."""
-        output = MockRequestOutput(
-            "<think>\nr1\n</think>\na1",
-            "<think>\nr2\n</think>\na2",
-        )
-        result = cast(list[ParsedResponse], parse_output(output=output))
-
-        assert len(result) == 2
-        assert result[0].answer == "a1"
-        assert result[1].answer == "a2"
-
-    def test_list_of_outputs_returns_nested_list(self) -> None:
-        """A list of RequestOutputs returns a nested [task][sample] structure."""
-        outputs = cast(
-            list[_GenerationOutput],
-            [
-                MockRequestOutput("<think>\nr\n</think>\na1"),
-                MockRequestOutput("plain answer"),
-            ],
-        )
-        result = cast(list[list[ParsedResponse]], parse_output(output=outputs))
-
-        assert len(result) == 2
-        # each inner list contains the samples for one task
-        assert result[0][0].has_valid_reasoning is True
-        assert result[1][0].has_reasoning_block is False
-
-    def test_prefixed_flag_forwarded(self) -> None:
-        """The prefixed flag is passed through to parse() for each completion."""
-        # prefixed=True treats the whole text as a truncated think block when no tags
-        output = MockRequestOutput("reasoning without close tag")
-        result = cast(list[ParsedResponse], parse_output(output=output, prefixed=True))
-
-        assert result[0].has_truncated_reasoning is True
-
-    def test_tag_forwarded(self) -> None:
-        """The tag argument is passed through to parse() for each completion."""
-        output = MockRequestOutput("<reasoning>\nthoughts\n</reasoning>\nans")
-        result = cast(
-            list[ParsedResponse], parse_output(output=output, tag="reasoning")
-        )
-
-        assert result[0].reasoning_tag == "reasoning"
-        assert result[0].has_valid_reasoning is True
+        assert result == []
 
 
 class TestParseEmptyReasoning:
@@ -279,7 +221,7 @@ class TestParseEmptyReasoning:
 
     def test_blank_block_sets_has_empty_reasoning(self) -> None:
         """A completed but blank reasoning block sets has_empty_reasoning=True."""
-        result = parse(response="<think>\n   \n</think>\nthe answer")
+        result = parse(response="<think>\n   \n</think>\nthe answer", model_info=_THINK)
 
         assert result.has_empty_reasoning is True
         assert result.has_reasoning_block is True
@@ -288,21 +230,27 @@ class TestParseEmptyReasoning:
 
     def test_valid_block_clears_has_empty_reasoning(self) -> None:
         """A completed, non-blank reasoning block sets has_empty_reasoning=False."""
-        result = parse(response="<think>\nsome reasoning\n</think>\nthe answer")
+        result = parse(
+            response="<think>\nsome reasoning\n</think>\nthe answer",
+            model_info=_THINK,
+        )
 
         assert result.has_empty_reasoning is False
         assert result.has_valid_reasoning is True
 
     def test_truncated_block_clears_has_empty_reasoning(self) -> None:
         """A truncated block (no close tag) sets has_empty_reasoning=False."""
-        result = parse(response="<think>\nreasoning that never finished")
+        result = parse(
+            response="<think>\nreasoning that never finished",
+            model_info=_THINK,
+        )
 
         assert result.has_empty_reasoning is False
         assert result.has_truncated_reasoning is True
 
     def test_no_block_clears_has_empty_reasoning(self) -> None:
         """A plain response with no block sets has_empty_reasoning=False."""
-        result = parse(response="just an answer")
+        result = parse(response="just an answer", model_info=_THINK)
 
         assert result.has_empty_reasoning is False
         assert result.has_reasoning_block is False
@@ -310,10 +258,12 @@ class TestParseEmptyReasoning:
     def test_mutually_exclusive_flags_sum_to_has_reasoning_block(self) -> None:
         """has_valid + has_truncated + has_empty always equals has_reasoning_block."""
         responses = [
-            parse(response="<think>\nreasoning\n</think>\nans"),  # valid
-            parse(response="<think>\nstarted..."),  # truncated
-            parse(response="<think>\n\n</think>\nans"),  # empty
-            parse(response="just an answer"),  # no block
+            parse(
+                response="<think>\nreasoning\n</think>\nans", model_info=_THINK
+            ),  # valid
+            parse(response="<think>\nstarted...", model_info=_THINK),  # truncated
+            parse(response="<think>\n\n</think>\nans", model_info=_THINK),  # empty
+            parse(response="just an answer", model_info=_THINK),  # no block
         ]
         for r in responses:
             sub_total = (
@@ -324,139 +274,184 @@ class TestParseEmptyReasoning:
             assert sub_total == r.has_reasoning_block
 
 
-class TestParseTokenizerDetection:
-    """Tests for automatic prefixed detection via the tokenizer argument."""
+# ---------------------------------------------------------------------------
+# Qwen3 — non-prefixed, <think> tags
+# ---------------------------------------------------------------------------
 
-    def test_prefixed_tokenizer_detects_prefixed_style(self) -> None:
-        """A PREFIXED tokenizer causes tagless output to be treated as truncated."""
-        # no tags in response — without tokenizer this would be a plain answer
+
+@pytest.mark.slow
+class TestQwen3Parse:
+    """parse() tests for Qwen/Qwen3-8B — non-prefixed, <think> tags."""
+
+    def test_standard_format(self, qwen3_tokenizer) -> None:
+        """Standard <think>...</think> response is parsed into reasoning and answer."""
         result = parse(
-            response="reasoning without any tags", tokenizer=MockPrefixedTokenizer()
+            response="<think>\nsome reasoning\n</think>\nthe answer",
+            tokenizer=qwen3_tokenizer,
+        )
+
+        assert result.has_valid_reasoning is True
+        assert result.reasoning == "some reasoning"
+        assert result.answer == "the answer"
+        assert result.reasoning_tag == "think"
+        assert result.extracted_answer is True
+
+    def test_tagless_is_plain_answer(self, qwen3_tokenizer) -> None:
+        """Non-prefixed tokenizer: response without tags is a plain answer."""
+        result = parse(
+            response="just an answer",
+            tokenizer=qwen3_tokenizer,
+        )
+
+        assert result.has_reasoning_block is False
+        assert result.answer == "just an answer"
+        assert result.extracted_answer is True
+
+    def test_token_counts_populated(self, qwen3_tokenizer) -> None:
+        """Token counts are set when calculate_tokens=True."""
+        result = parse(
+            response="<think>\nsome reasoning\n</think>\nhi",
+            tokenizer=qwen3_tokenizer,
+            calculate_tokens=True,
+        )
+
+        assert result.reasoning_token_count is not None
+        assert result.reasoning_token_count > 0
+        assert result.answer_token_count is not None
+        assert result.answer_token_count > 0
+
+    def test_token_counts_none_by_default(self, qwen3_tokenizer) -> None:
+        """Token counts remain None when calculate_tokens is not set."""
+        result = parse(
+            response="<think>\nreasoning\n</think>\nthe answer",
+            tokenizer=qwen3_tokenizer,
+        )
+
+        assert result.reasoning_token_count is None
+        assert result.answer_token_count is None
+
+    def test_flat_list(self, qwen3_tokenizer) -> None:
+        """Tokenizer is applied to every string in a flat list."""
+        result = parse(
+            response=["<think>\nreasoning\n</think>\nhi", "plain answer"],
+            tokenizer=qwen3_tokenizer,
+        )
+
+        assert result[0].has_valid_reasoning is True
+        assert result[1].has_reasoning_block is False
+
+    def test_nested_list(self, qwen3_tokenizer) -> None:
+        """Tokenizer is applied to every string in a nested [task][sample] list."""
+        result = parse(
+            response=[["<think>\nreasoning\n</think>\nhi"], ["plain answer"]],
+            tokenizer=qwen3_tokenizer,
+        )
+
+        assert result[0][0].has_valid_reasoning is True
+        assert result[1][0].has_reasoning_block is False
+
+
+# ---------------------------------------------------------------------------
+# OLMo-3 — prefixed, <think> tags
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+class TestOlmo3Parse:
+    """parse() tests for allenai/OLMo-3-7B-Think — prefixed, <think> tags.
+
+    The template injects <think> into the generation prompt, so decoded output
+    contains only the closing tag — the opening tag is never in the model output.
+    """
+
+    def test_prefixed_format(self, olmo3_tokenizer) -> None:
+        """Close-tag-only response (prefixed template) is parsed correctly."""
+        result = parse(
+            response="some reasoning\n</think>\nthe answer",
+            tokenizer=olmo3_tokenizer,
+        )
+
+        assert result.has_valid_reasoning is True
+        assert result.answer == "the answer"
+        assert result.extracted_answer is True
+
+    def test_tagless_is_truncated(self, olmo3_tokenizer) -> None:
+        """Prefixed tokenizer: response without any tags is treated as truncated."""
+        result = parse(
+            response="reasoning that never closed",
+            tokenizer=olmo3_tokenizer,
         )
 
         assert result.has_truncated_reasoning is True
         assert result.has_reasoning_block is True
         assert result.answer == ""
 
-    def test_inline_tokenizer_treats_tagless_as_plain(self) -> None:
-        """An INLINE tokenizer leaves tagless output as a plain answer."""
-        result = parse(response="just an answer", tokenizer=MockInlineTokenizer())
-
-        assert result.has_reasoning_block is False
-        assert result.answer == "just an answer"
-
-    def test_tokenizer_overrides_explicit_prefixed_false(self) -> None:
-        """A PREFIXED tokenizer overrides prefixed=False passed explicitly."""
+    def test_empty_answer_not_valid(self, olmo3_tokenizer) -> None:
+        """valid_answer is False when the response is truncated (no answer produced)."""
         result = parse(
-            response="reasoning without any tags",
-            prefixed=False,
-            tokenizer=MockPrefixedTokenizer(),
+            response="reasoning that never closed",
+            tokenizer=olmo3_tokenizer,
         )
 
-        assert result.has_truncated_reasoning is True
+        assert result.extracted_answer is False
 
-    def test_tokenizer_overrides_explicit_prefixed_true(self) -> None:
-        """An INLINE tokenizer overrides prefixed=True passed explicitly."""
+    def test_model_info_param(self, olmo3_tokenizer) -> None:
+        """Passing model_info directly gives the same result as passing a tokenizer."""
+        model_info = detect_model(olmo3_tokenizer)
+        response = "reasoning\n</think>\nthe answer"
+
+        result_via_tokenizer = parse(response=response, tokenizer=olmo3_tokenizer)
+        result_via_model_info = parse(response=response, model_info=model_info)
+
+        assert (
+            result_via_model_info.has_valid_reasoning
+            == result_via_tokenizer.has_valid_reasoning
+        )
+        assert result_via_model_info.answer == result_via_tokenizer.answer
+        assert result_via_model_info.reasoning == result_via_tokenizer.reasoning
+
+
+# ---------------------------------------------------------------------------
+# Ministral — non-prefixed, [THINK] bracket tags
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+class TestMinistralParse:
+    """parse() tests for Ministral-3-3B-Reasoning-2512 — non-prefixed, [THINK] tags."""
+
+    def test_bracket_tag_format(self, ministral_tokenizer) -> None:
+        """[THINK]...[/THINK] response is parsed correctly."""
+        result = parse(
+            response="[THINK]\nsome reasoning\n[/THINK]\nthe answer",
+            tokenizer=ministral_tokenizer,
+        )
+
+        assert result.has_valid_reasoning is True
+        assert result.reasoning == "some reasoning"
+        assert result.answer == "the answer"
+        assert result.reasoning_tag == "THINK"
+        assert result.extracted_answer is True
+
+    def test_tagless_is_plain_answer(self, ministral_tokenizer) -> None:
+        """Non-prefixed tokenizer: response without tags is a plain answer."""
         result = parse(
             response="just an answer",
-            prefixed=True,
-            tokenizer=MockInlineTokenizer(),
+            tokenizer=ministral_tokenizer,
         )
 
-        # INLINE detection means the response is treated as a plain answer, not truncated
         assert result.has_reasoning_block is False
         assert result.answer == "just an answer"
 
-    def test_prefixed_tokenizer_forwarded_through_parse_all(self) -> None:
-        """Tokenizer is forwarded to every parse() call inside parse_all()."""
-        responses = [["reasoning with no tags"], ["also no tags"]]
-        result = parse_all(responses=responses, tokenizer=MockPrefixedTokenizer())
-
-        assert result[0][0].has_truncated_reasoning is True
-        assert result[1][0].has_truncated_reasoning is True
-
-    def test_prefixed_tokenizer_forwarded_through_parse_output(self) -> None:
-        """Tokenizer is forwarded to every parse() call inside parse_output()."""
-        output = MockRequestOutput("reasoning with no tags", "also no tags")
-        result = cast(
-            list[ParsedResponse],
-            parse_output(output=output, tokenizer=MockPrefixedTokenizer()),
-        )
-
-        assert result[0].has_truncated_reasoning is True
-        assert result[1].has_truncated_reasoning is True
-
-
-class TestParseCalculateTokens:
-    """Tests for the calculate_tokens argument."""
-
-    def test_token_counts_populated_when_requested(self) -> None:
-        """Token counts are set when calculate_tokens=True and a tokenizer is provided."""
-        response = "<think>\nabc\n</think>\nhi"
+    def test_token_counts_populated(self, ministral_tokenizer) -> None:
+        """Token counts are set when calculate_tokens=True."""
         result = parse(
-            response=response,
-            tokenizer=MockInlineTokenizer(),
+            response="[THINK]\nsome reasoning\n[/THINK]\nhi",
+            tokenizer=ministral_tokenizer,
             calculate_tokens=True,
         )
 
-        # mock encode returns one token per character
-        assert result.reasoning_token_count == len("\nabc\n")
-        assert result.answer_token_count == len("hi")
-
-    def test_token_counts_none_without_tokenizer(self) -> None:
-        """Token counts remain None when calculate_tokens=True but no tokenizer given."""
-        result = parse(
-            response="<think>\nreasoning\n</think>\nthe answer",
-            calculate_tokens=True,
-        )
-
-        assert result.reasoning_token_count is None
-        assert result.answer_token_count is None
-
-    def test_token_counts_none_by_default(self) -> None:
-        """Token counts are None by default even when a tokenizer is provided."""
-        result = parse(
-            response="<think>\nreasoning\n</think>\nthe answer",
-            tokenizer=MockInlineTokenizer(),
-        )
-
-        assert result.reasoning_token_count is None
-        assert result.answer_token_count is None
-
-    def test_token_counts_zero_for_empty_strings(self) -> None:
-        """Empty reasoning or answer produces a token count of zero."""
-        # truncated response has no answer
-        result = parse(
-            response="<think>\nstarted...",
-            tokenizer=MockInlineTokenizer(),
-            calculate_tokens=True,
-        )
-
-        assert result.answer_token_count == 0
-
-    def test_calculate_tokens_forwarded_through_parse_all(self) -> None:
-        """calculate_tokens is forwarded to every parse() call inside parse_all()."""
-        responses = [["<think>\nabc\n</think>\nhi"]]
-        result = parse_all(
-            responses=responses,
-            tokenizer=MockInlineTokenizer(),
-            calculate_tokens=True,
-        )
-
-        assert result[0][0].reasoning_token_count is not None
-        assert result[0][0].answer_token_count is not None
-
-    def test_calculate_tokens_forwarded_through_parse_output(self) -> None:
-        """calculate_tokens is forwarded to every parse() call inside parse_output()."""
-        output = MockRequestOutput("<think>\nabc\n</think>\nhi")
-        result = cast(
-            list[ParsedResponse],
-            parse_output(
-                output=output,
-                tokenizer=MockInlineTokenizer(),
-                calculate_tokens=True,
-            ),
-        )
-
-        assert result[0].reasoning_token_count is not None
-        assert result[0].answer_token_count is not None
+        assert result.reasoning_token_count is not None
+        assert result.reasoning_token_count > 0
+        assert result.answer_token_count is not None
+        assert result.answer_token_count > 0

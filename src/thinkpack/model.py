@@ -91,6 +91,23 @@ class ModelInfo:
             return f"</{self.tag_content}>"
         return f"[/{self.tag_content}]"
 
+    @property
+    def tag_regex(self) -> tuple[re.Pattern[str], re.Pattern[str]]:
+        """The compiled open/close regex patterns for this model's reasoning tags.
+
+        Returns a (open_re, close_re) tuple with a capturing group around the tag name.
+        """
+        escaped = re.escape(self.tag_content)
+        if self.tag_style == TagStyle.BRACKET:
+            return (
+                re.compile(rf"\[({escaped})\]", re.IGNORECASE),
+                re.compile(rf"\[/({escaped})\]", re.IGNORECASE),
+            )
+        return (
+            re.compile(rf"<({escaped})>", re.IGNORECASE),
+            re.compile(rf"</({escaped})>", re.IGNORECASE),
+        )
+
     def with_tag(
         self,
         tag: str,
