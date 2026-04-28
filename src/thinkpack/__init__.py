@@ -3,7 +3,13 @@
 import logging
 
 from thinkpack.chat import apply_chat_template, apply_chat_templates
-from thinkpack.mask import MaskType, mask
+from thinkpack.distill import (
+    build_prompts,
+    extract_distilled_reasoning,
+    to_conversations,
+    update_records,
+)
+from thinkpack.mask import MaskType, apply_mask
 from thinkpack.model import ModelInfo, TagStyle, detect_model, get_model_info
 from thinkpack.parse import ParsedResponse, parse
 from thinkpack.stats import ResponseStats, compute_stats
@@ -19,11 +25,15 @@ __all__ = [
     "detect_model",
     "get_model_info",
     "MaskType",
-    "mask",
+    "apply_mask",
     "ParsedResponse",
     "parse",
     "ResponseStats",
     "compute_stats",
     "apply_chat_template",
     "apply_chat_templates",
+    "build_prompts",
+    "extract_distilled_reasoning",
+    "to_conversations",
+    "update_records",
 ]
