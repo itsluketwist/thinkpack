@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from thinkpack.skill import Tool, generate, write
+from thinkpack._skill import Tool, generate, write
 
 
 def _skill(args: argparse.Namespace) -> None:

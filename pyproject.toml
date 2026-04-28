@@ -42,7 +42,7 @@ dev = [
 ]
 
 [project.scripts]
-thinkpack = "thinkpack.cli:main"
+thinkpack = "thinkpack._cli:main"
 
 [project.urls]
 Homepage = "https://github.com/itsluketwist/thinkpack"

@@ -1,12 +1,12 @@
-"""Tests for thinkpack.cli — basic coverage of CLI entry point and skill handler."""
+"""Tests for thinkpack._cli — basic coverage of CLI entry point and skill handler."""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from thinkpack.cli import _skill, main
-from thinkpack.skill import Tool
+from thinkpack._cli import _skill, main
+from thinkpack._skill import Tool
 
 
 class TestSkillHandler:
@@ -19,7 +19,7 @@ class TestSkillHandler:
         args.dir = None
 
         with patch(
-            "thinkpack.cli.generate", return_value=("raw content", None)
+            "thinkpack._cli.generate", return_value=("raw content", None)
         ) as mock_gen:
             _skill(args)
             mock_gen.assert_called_once_with(tool=None)
@@ -33,7 +33,7 @@ class TestSkillHandler:
         args.dir = str(tmp_path)
 
         expected_path = tmp_path / ".claude/commands/thinkpack.md"
-        with patch("thinkpack.cli.write", return_value=expected_path) as mock_write:
+        with patch("thinkpack._cli.write", return_value=expected_path) as mock_write:
             _skill(args)
             mock_write.assert_called_once_with(
                 tool=Tool.CLAUDE,
@@ -49,7 +49,7 @@ class TestSkillHandler:
         args.dir = None
 
         fake_path = Path("/fake/thinkpack.mdc")
-        with patch("thinkpack.cli.write", return_value=fake_path) as mock_write:
+        with patch("thinkpack._cli.write", return_value=fake_path) as mock_write:
             _skill(args)
             mock_write.assert_called_once_with(tool=Tool.CURSOR, directory=None)
 
@@ -60,7 +60,7 @@ class TestSkillHandler:
             args.tool = tool.value
             args.dir = str(tmp_path)
             fake_path = tmp_path / "out.md"
-            with patch("thinkpack.cli.write", return_value=fake_path):
+            with patch("thinkpack._cli.write", return_value=fake_path):
                 _skill(args)  # should not raise
 
 
@@ -77,14 +77,14 @@ class TestMain:
     def test_skill_subcommand_dispatches_to_skill_handler(self) -> None:
         """The 'skill' subcommand is routed to _skill()."""
         with patch("sys.argv", ["thinkpack", "skill"]):
-            with patch("thinkpack.cli._skill") as mock_skill:
+            with patch("thinkpack._cli._skill") as mock_skill:
                 main()
                 mock_skill.assert_called_once()
 
     def test_skill_tool_arg_is_parsed(self) -> None:
         """--tool is parsed and forwarded to _skill() via the args namespace."""
         with patch("sys.argv", ["thinkpack", "skill", "--tool", "claude"]):
-            with patch("thinkpack.cli._skill") as mock_skill:
+            with patch("thinkpack._cli._skill") as mock_skill:
                 main()
                 args = mock_skill.call_args[0][0]
                 assert args.tool == "claude"
@@ -92,7 +92,7 @@ class TestMain:
     def test_skill_dir_arg_is_parsed(self, tmp_path) -> None:
         """--dir is parsed and forwarded to _skill() via the args namespace."""
         with patch("sys.argv", ["thinkpack", "skill", "--dir", str(tmp_path)]):
-            with patch("thinkpack.cli._skill") as mock_skill:
+            with patch("thinkpack._cli._skill") as mock_skill:
                 main()
                 args = mock_skill.call_args[0][0]
                 assert args.dir == str(tmp_path)
