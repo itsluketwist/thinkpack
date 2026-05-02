@@ -5,23 +5,23 @@ from enum import IntFlag
 
 from datasets import Dataset
 
-from thinkpack._model import TemplateStyle, _Tokenizer, detect_model
+from thinkpack.chat import apply_chat_template as _apply_chat_template
+from thinkpack.model import ModelInfo, _Tokenizer, get_model_info
 
 
 # pytorch's CrossEntropyLoss uses ignore_index=-100 by default, and all major
 # training frameworks (transformers Trainer, trl SFTTrainer, unsloth) inherit
-# this default — so -100 is the correct value unless the trainer is configured
-# otherwise. exposed as a parameter on mask() for the rare case where it differs.
+# this default — exposed as a parameter for the rare case where it differs
 _DEFAULT_IGNORE_INDEX = -100
 
 
-class Mask(IntFlag):
+class MaskType(IntFlag):
     """
     Sections of the training sequence to mask from the loss.
 
-    Combine sections with | to mask multiple parts at once:
-        Mask.THINK              — mask only the think block (most common)
-        Mask.PROMPT | Mask.THINK — mask prompt and think (train on response only)
+    Combine with | to mask multiple sections at once:
+        MaskType.THINK                    — mask only the think block (most common)
+        MaskType.PROMPT | MaskType.THINK  — train on response only
 
     PROMPT covers the user instruction. THINK covers the full reasoning block
     including its opening and closing tags. RESPONSE covers the model's answer.
@@ -33,43 +33,6 @@ class Mask(IntFlag):
     RESPONSE = 4
 
 
-def _build_assistant_message(
-    record: dict[str, str],
-    style: TemplateStyle,
-    open_tag: str,
-) -> dict[str, str]:
-    """
-    Build the assistant message dict from a training record.
-
-    For NATIVE templates, passes reasoning as a separate reasoning_content field.
-    For INLINE and PREFIXED templates, wraps reasoning in inline reasoning tags.
-    The presence of a "reasoning" key (even if empty) controls whether the think
-    block appears in the sequence — required when masking so the model sees the
-    same context at training time as at inference time.
-
-    Returns an assistant message dict ready to pass to apply_chat_template.
-    """
-    # use None sentinel to distinguish "key absent" from "key present but empty"
-    reasoning_raw = record.get("reasoning", None)
-    response = record["response"]
-
-    message: dict[str, str] = {"role": "assistant"}
-
-    if reasoning_raw is not None and style == TemplateStyle.NATIVE:
-        # template natively handles reasoning via a dedicated field (e.g. Qwen3)
-        message["content"] = response
-        message["reasoning_content"] = reasoning_raw.strip()
-    elif reasoning_raw is not None:
-        # derive the closing tag from the opening tag, e.g. <think> -> </think>
-        close_tag = open_tag.replace("<", "</", 1)
-        reasoning = reasoning_raw.strip()
-        message["content"] = f"{open_tag}\n{reasoning}\n{close_tag}\n{response}"
-    else:
-        message["content"] = response
-
-    return message
-
-
 def _tokenize_prefix(
     tokenizer: _Tokenizer,
     text: str,
@@ -78,8 +41,8 @@ def _tokenize_prefix(
     """
     Tokenize a text prefix and return its token count.
 
-    Used to locate section boundaries within the full token sequence by
-    tokenizing the text up to a known character position.
+    Used to locate section boundaries within the full token sequence by tokenizing
+    the text up to a known character position.
 
     Returns the number of tokens in the prefix.
     """
@@ -94,48 +57,49 @@ def _tokenize_prefix(
 
 
 def _tokenize_record(
-    record: dict[str, str],
+    conversation: list[dict[str, str]],
     tokenizer: _Tokenizer,
-    style: TemplateStyle,
-    open_tag: str,
+    model_info: ModelInfo,
     max_seq_length: int,
-    masked: Mask,
+    masked: MaskType,
     ignore_index: int,
+    override_tag: str | None,
 ) -> dict[str, list[int]]:
     """
-    Tokenize a single training record and apply label masking.
+    Tokenize a single training conversation and apply label masking.
 
-    Locates the PROMPT / THINK / RESPONSE boundaries in the token sequence by
-    tokenizing text prefixes (rather than using add_generation_prompt=True). This
-    avoids a subtle issue with PREFIXED templates: the generation prompt already
-    ends with <think>, so using it as a prefix boundary would leave the opening
-    tag trainable while masking the closing tag — teaching the model to "open but
-    never close" the reasoning block.
+    Locates PROMPT / THINK / RESPONSE boundaries by tokenizing text prefixes rather
+    than using add_generation_prompt=True. This avoids a subtle issue with PREFIXED
+    templates: the generation prompt already ends with <think>, so using it as a
+    prefix boundary would leave the opening tag trainable while masking the closing
+    tag — teaching the model to "open but never close" the reasoning block.
 
-    Each section flagged in `masked` has its labels set to _IGNORE_INDEX so
-    PyTorch's cross-entropy ignores those tokens during loss computation.
+    Each section flagged in `masked` has its labels set to ignore_index so PyTorch's
+    cross-entropy ignores those tokens during loss computation.
 
     Returns a dict with input_ids, labels, and attention_mask.
     """
-    messages = [
-        {"role": "user", "content": record["instruction"]},
-        _build_assistant_message(
-            record=record,
-            style=style,
-            open_tag=open_tag,
-        ),
-    ]
-    full_text_raw: str | list[int] = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
+    # response text is used to locate the response boundary
+    response = conversation[-1]["content"]
+
+    # apply the chat template with reasoning embedded, producing the full training sequence
+    full_text = _apply_chat_template(
+        conversation=conversation,
+        tokenizer=tokenizer,
         add_generation_prompt=False,
+        add_generation_reasoning=False,
+        override_tag=override_tag,
     )
-    # some tokenizers return token ids despite tokenize=False — decode them
-    full_text = (
-        tokenizer.decode(full_text_raw)
-        if isinstance(full_text_raw, list)
-        else full_text_raw
-    )
+
+    # some templates (e.g. DeepSeek R1) strip <think>...</think> from assistant content;
+    # re-insert the think block if the template removed it so the training sequence is complete
+    reasoning_raw = conversation[-1].get("reasoning", None)
+    if reasoning_raw is not None and model_info.open_tag not in full_text:
+        reasoning = reasoning_raw.strip()
+        response_char = full_text.rfind(response)
+        think_block = f"{model_info.open_tag}\n{reasoning}\n{model_info.close_tag}\n"
+        full_text = full_text[:response_char] + think_block + full_text[response_char:]
+
     input_ids = tokenizer.encode(
         full_text,
         add_special_tokens=False,
@@ -155,7 +119,7 @@ def _tokenize_record(
         }
 
     # find the opening reasoning tag to locate the think block boundary
-    open_match = re.search(re.escape(open_tag), full_text)
+    open_match = re.search(re.escape(model_info.open_tag), full_text)
     think_start = (
         _tokenize_prefix(
             tokenizer=tokenizer,
@@ -167,7 +131,7 @@ def _tokenize_record(
     )
 
     # locate the response boundary (rfind to handle response text in the instruction)
-    response_start_char = full_text.rfind(record["response"])
+    response_start_char = full_text.rfind(response)
     response_start = _tokenize_prefix(
         tokenizer=tokenizer,
         text=full_text[:response_start_char],
@@ -175,18 +139,18 @@ def _tokenize_record(
     )
 
     # mask each requested section independently
-    if Mask.PROMPT in masked:
+    if MaskType.PROMPT in masked:
         # mask everything from the start up to the think block (or response if no think)
         prompt_end = think_start if think_start is not None else response_start
         for i in range(prompt_end):
             labels[i] = ignore_index
 
-    if Mask.THINK in masked and think_start is not None:
+    if MaskType.THINK in masked and think_start is not None:
         # mask the full reasoning block including its opening and closing tags
         for i in range(think_start, response_start):
             labels[i] = ignore_index
 
-    if Mask.RESPONSE in masked:
+    if MaskType.RESPONSE in masked:
         # mask the response tokens
         for i in range(response_start, len(labels)):
             labels[i] = ignore_index
@@ -198,57 +162,56 @@ def _tokenize_record(
     }
 
 
-def mask(
-    records: list[dict[str, str]],
+def apply_mask(
+    conversations: list[list[dict[str, str]]],
     tokenizer: _Tokenizer,
-    masked: Mask | None = Mask.THINK,
+    masked: MaskType | None = MaskType.THINK,
     max_seq_length: int = 32768,
     ignore_index: int = _DEFAULT_IGNORE_INDEX,
-    tag: str | None = None,
+    override_tag: str | None = None,
 ) -> Dataset:
     """
-    Format training records into a pretokenized dataset with selected sections masked.
+    Tokenize training conversations and mask selected sections from the loss.
 
-    Each record must have "instruction" and "response" keys. An optional "reasoning"
-    key provides think block content — if absent when masking is applied, an empty
-    reasoning block is injected so training context matches inference time.
+    Each conversation must end with an assistant message containing at least a
+    "content" key (the response). An optional "reasoning" key on the assistant message
+    provides think block content — if absent when masking is active, an empty reasoning
+    block is injected so training context matches inference time. Combine MaskType flags
+    with | to mask multiple sections at once (see MaskType for details).
 
-    Template style (INLINE, NATIVE, PREFIXED) is detected automatically from the
-    tokenizer. Combine Mask flags with | to mask multiple sections at once (see
-    the Mask class for details). Pass masked=None to train on all tokens.
+    Pass masked=None to train on all tokens.
 
     Returns a HuggingFace Dataset with input_ids, labels, and attention_mask columns.
     """
-    model_info = detect_model(tokenizer=tokenizer)
-    # user-supplied tag overrides the detected default (useful for INLINE models
-    # whose tag differs from the <think> default, e.g. <reasoning>)
-    open_tag = f"<{tag}>" if tag is not None else model_info.open_tag
+    model_info = get_model_info(tokenizer=tokenizer, override_tag=override_tag)
 
-    # normalise None to an empty Mask so downstream logic is consistent
-    effective_masked = masked if masked is not None else Mask(0)
+    # normalise None to an empty MaskType so downstream logic is consistent
+    effective_masked = masked if masked is not None else MaskType(0)
 
-    # when masking is active, inject an empty "reasoning" key for records that lack one
-    # so the think block appears in the sequence — required for training/inference context
-    # alignment on PREFIXED models that always emit think blocks at inference time
+    # when masking is active, inject an empty "reasoning" key into conversations that
+    # lack one — ensures the think block appears for training/inference context alignment
+    # on PREFIXED models that always emit think blocks at inference time
     if effective_masked:
-        records = [
-            record if "reasoning" in record else {**record, "reasoning": ""}
-            for record in records
+        conversations = [
+            conv
+            if any("reasoning" in m for m in conv)
+            else [*conv[:-1], {**conv[-1], "reasoning": ""}]
+            for conv in conversations
         ]
 
     all_input_ids = []
     all_labels = []
     all_attention_mask = []
 
-    for record in records:
+    for conv in conversations:
         result = _tokenize_record(
-            record=record,
+            conversation=conv,
             tokenizer=tokenizer,
-            style=model_info.style,
-            open_tag=open_tag,
+            model_info=model_info,
             max_seq_length=max_seq_length,
             masked=effective_masked,
             ignore_index=ignore_index,
+            override_tag=override_tag,
         )
         all_input_ids.append(result["input_ids"])
         all_labels.append(result["labels"])

@@ -1,398 +1,301 @@
 """Tests for thinkpack.mask — training-time loss masking for reasoning blocks."""
 
-from thinkpack.mask import Mask, mask
+import pytest
+
+from thinkpack.mask import MaskType, apply_mask
 
 
-# sentinel used by detect_model() for NATIVE detection — must match _model.py
-_NATIVE_SENTINEL = "__thinkpack_detect__"
+# ---------------------------------------------------------------------------
+# helpers — decode only the masked or unmasked portion of a tokenized sequence
+# ---------------------------------------------------------------------------
 
 
-class MockInlineTokenizer:
-    """
-    Minimal mock tokenizer with INLINE template style.
-
-    Uses character-level encoding (one token per character) so boundary
-    positions in labels map directly to character offsets in the rendered text,
-    making assertions straightforward.
-    """
-
-    # unique string so detect_model() cache entry is keyed to this mock only
-    chat_template: str | None = "mock-inline-v1"
-
-    def apply_chat_template(
-        self,
-        conversation: list[dict[str, str]],
-        tokenize: bool = True,
-        add_generation_prompt: bool = False,
-    ) -> str:
-        """Return a simple bracketed template; no trailing xml tag (INLINE)."""
-        parts = []
-        for m in conversation:
-            if m["role"] == "user":
-                parts.append(f"[U]{m['content']}[/U]")
-            elif m["role"] == "assistant":
-                # ignore reasoning_content if present — INLINE does not handle it
-                parts.append(f"[A]{m['content']}[/A]")
-        result = "".join(parts)
-        if add_generation_prompt:
-            # no trailing xml tag — ensures detect_model() returns INLINE
-            result += "[A]"
-        return result
-
-    def encode(
-        self,
-        text: str,
-        add_special_tokens: bool = True,
-        truncation: bool = False,
-        max_length: int = 32768,
-    ) -> list[int]:
-        """Character-level encoding: one token per character."""
-        tokens = [ord(c) % 1000 for c in text]
-        if truncation:
-            tokens = tokens[:max_length]
-        return tokens
-
-    def decode(self, token_ids: list[int]) -> str:
-        """Reverse of character-level encoding."""
-        return "".join(chr(t) for t in token_ids)
+def _decode_masked(tokenizer, row: dict) -> str:
+    """Decode the tokens whose label is -100 (masked from the loss)."""
+    ids = [
+        row["input_ids"][i] for i, label in enumerate(row["labels"]) if label == -100
+    ]
+    return tokenizer.decode(ids)
 
 
-class MockNativeTokenizer:
-    """
-    Minimal mock tokenizer with NATIVE template style (e.g. Qwen3).
-
-    Renders reasoning_content inside think tags when present, which allows
-    detect_model() to identify the NATIVE style via the _NATIVE_SENTINEL probe.
-    """
-
-    chat_template: str | None = "mock-native-v1"
-
-    def apply_chat_template(
-        self,
-        conversation: list[dict[str, str]],
-        tokenize: bool = True,
-        add_generation_prompt: bool = False,
-    ) -> str:
-        """Include reasoning_content inside <think> tags when the field is present."""
-        parts = []
-        for m in conversation:
-            if m["role"] == "user":
-                parts.append(f"[U]{m['content']}[/U]")
-            elif m["role"] == "assistant":
-                reasoning = m.get("reasoning_content", "")
-                if reasoning:
-                    # native templates wrap reasoning in dedicated think tags
-                    parts.append(
-                        f"[A]<think>\n{reasoning}\n</think>\n{m['content']}[/A]"
-                    )
-                else:
-                    parts.append(f"[A]{m['content']}[/A]")
-        return "".join(parts)
-
-    def encode(
-        self,
-        text: str,
-        add_special_tokens: bool = True,
-        truncation: bool = False,
-        max_length: int = 32768,
-    ) -> list[int]:
-        """Character-level encoding: one token per character."""
-        tokens = [ord(c) % 1000 for c in text]
-        if truncation:
-            tokens = tokens[:max_length]
-        return tokens
-
-    def decode(self, token_ids: list[int]) -> str:
-        """Reverse of character-level encoding."""
-        return "".join(chr(t) for t in token_ids)
+def _decode_unmasked(tokenizer, row: dict) -> str:
+    """Decode the tokens that contribute to the loss (label matches input_id)."""
+    ids = [
+        row["input_ids"][i] for i, label in enumerate(row["labels"]) if label != -100
+    ]
+    return tokenizer.decode(ids)
 
 
-class MockPrefixedTokenizer:
-    """
-    Minimal mock tokenizer with PREFIXED template style.
-
-    Appends the open_tag at the end of the generation prompt, which is what
-    detect_model() looks for to classify a tokenizer as PREFIXED.
-    """
-
-    def __init__(self, open_tag: str = "<think>") -> None:
-        self._open_tag = open_tag
-        # unique string per tag variant so each config gets its own cache entry
-        self.chat_template: str | None = f"mock-prefixed-v1 tag={open_tag}"
-
-    def apply_chat_template(
-        self,
-        conversation: list[dict[str, str]],
-        tokenize: bool = True,
-        add_generation_prompt: bool = False,
-    ) -> str:
-        """Append open_tag at the end of the generation prompt (PREFIXED style)."""
-        parts = []
-        for m in conversation:
-            if m["role"] == "user":
-                parts.append(f"[U]{m['content']}[/U]")
-            elif m["role"] == "assistant":
-                parts.append(f"[A]{m['content']}[/A]")
-        result = "".join(parts)
-        if add_generation_prompt:
-            # trailing xml tag triggers PREFIXED detection in detect_model()
-            result += self._open_tag
-        return result
-
-    def encode(
-        self,
-        text: str,
-        add_special_tokens: bool = True,
-        truncation: bool = False,
-        max_length: int = 32768,
-    ) -> list[int]:
-        """Character-level encoding: one token per character."""
-        tokens = [ord(c) % 1000 for c in text]
-        if truncation:
-            tokens = tokens[:max_length]
-        return tokens
-
-    def decode(self, token_ids: list[int]) -> str:
-        """Reverse of character-level encoding."""
-        return "".join(chr(t) for t in token_ids)
-
-
-# module-level tokenizer instances — reused across tests so detect_model() only
-# runs once per mock configuration (cache is keyed on chat_template string)
-_INLINE = MockInlineTokenizer()
-_NATIVE = MockNativeTokenizer()
-_PREFIXED = MockPrefixedTokenizer()
-
-
-def _record(
-    instruction: str = "hi",
-    reasoning: str | None = "step1",
-    response: str = "answer",
-) -> dict[str, str]:
-    """Build a training record; pass reasoning=None to omit the key entirely."""
-    r: dict[str, str] = {"instruction": instruction, "response": response}
+def _conversation(
+    instruction: str = "test question",
+    reasoning: str | None = "detailed reasoning here",
+    response: str = "final answer",
+) -> list[dict[str, str]]:
+    """Build a training conversation; pass reasoning=None to omit the key from the assistant message."""
+    assistant: dict[str, str] = {"role": "assistant", "content": response}
     if reasoning is not None:
-        r["reasoning"] = reasoning
-    return r
+        assistant["reasoning"] = reasoning
+    return [
+        {"role": "user", "content": instruction},
+        assistant,
+    ]
 
 
-# expected rendered text for the default _record() with INLINE/PREFIXED/NATIVE:
-# "[U]hi[/U][A]<think>\nstep1\n</think>\nanswer[/A]"
-# character positions:
-#   <think>  starts at 12
-#   answer   starts at 35
-_DEFAULT_FULL_TEXT = "[U]hi[/U][A]<think>\nstep1\n</think>\nanswer[/A]"
-_THINK_START = _DEFAULT_FULL_TEXT.index("<think>")  # 12
-_RESPONSE_START = _DEFAULT_FULL_TEXT.rfind("answer")  # 35
+# ---------------------------------------------------------------------------
+# enum tests — no tokenizer required, always fast
+# ---------------------------------------------------------------------------
 
 
 class TestMaskEnum:
-    """Tests for the Mask IntFlag enum."""
+    """Tests for the MaskType IntFlag enum."""
 
     def test_values(self) -> None:
-        assert Mask.PROMPT == 1
-        assert Mask.THINK == 2
-        assert Mask.RESPONSE == 4
+        assert MaskType.PROMPT == 1
+        assert MaskType.THINK == 2
+        assert MaskType.RESPONSE == 4
 
     def test_combination_contains_both_flags(self) -> None:
-        combined = Mask.PROMPT | Mask.THINK
-        assert Mask.PROMPT in combined
-        assert Mask.THINK in combined
-        assert Mask.RESPONSE not in combined
+        combined = MaskType.PROMPT | MaskType.THINK
+        assert MaskType.PROMPT in combined
+        assert MaskType.THINK in combined
+        assert MaskType.RESPONSE not in combined
 
     def test_zero_is_falsy(self) -> None:
-        assert not Mask(0)
+        assert not MaskType(0)
 
     def test_nonzero_is_truthy(self) -> None:
-        assert Mask.THINK
-        assert Mask.PROMPT | Mask.THINK
+        assert MaskType.THINK
+        assert MaskType.PROMPT | MaskType.THINK
 
 
+# ---------------------------------------------------------------------------
+# integration tests — require real tokenizers, marked slow
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
 class TestMaskOutputStructure:
-    """Tests for the shape and columns of the Dataset returned by mask()."""
+    """Tests for the shape and columns of the Dataset returned by apply_mask()."""
 
-    def test_returns_three_columns(self) -> None:
-        ds = mask(records=[_record()], tokenizer=_INLINE)
+    def test_returns_three_columns(self, qwen3_tokenizer) -> None:
+        ds = apply_mask(conversations=[_conversation()], tokenizer=qwen3_tokenizer)
         assert set(ds.column_names) == {"input_ids", "labels", "attention_mask"}
 
-    def test_length_matches_record_count(self) -> None:
-        records = [_record(), _record(instruction="q2", response="a2")]
-        ds = mask(records=records, tokenizer=_INLINE)
+    def test_length_matches_conversation_count(self, qwen3_tokenizer) -> None:
+        convs = [_conversation(), _conversation(instruction="q2", response="a2")]
+        ds = apply_mask(conversations=convs, tokenizer=qwen3_tokenizer)
         assert len(ds) == 2
 
-    def test_empty_records_returns_empty_dataset(self) -> None:
-        ds = mask(records=[], tokenizer=_INLINE)
+    def test_empty_conversations_returns_empty_dataset(self, qwen3_tokenizer) -> None:
+        ds = apply_mask(conversations=[], tokenizer=qwen3_tokenizer)
         assert len(ds) == 0
 
-    def test_attention_mask_all_ones(self) -> None:
-        ds = mask(records=[_record()], tokenizer=_INLINE)
+    def test_attention_mask_all_ones(self, qwen3_tokenizer) -> None:
+        ds = apply_mask(conversations=[_conversation()], tokenizer=qwen3_tokenizer)
         assert all(v == 1 for v in ds[0]["attention_mask"])
 
-    def test_input_ids_labels_attention_mask_same_length(self) -> None:
-        ds = mask(records=[_record()], tokenizer=_INLINE)
+    def test_input_ids_labels_same_length(self, qwen3_tokenizer) -> None:
+        ds = apply_mask(conversations=[_conversation()], tokenizer=qwen3_tokenizer)
         row = ds[0]
         assert len(row["input_ids"]) == len(row["labels"]) == len(row["attention_mask"])
 
 
-class TestMaskInline:
-    """Tests for mask() with an INLINE-style tokenizer."""
+@pytest.mark.slow
+class TestMaskThink:
+    """Tests for MaskType.THINK — reasoning block masked, prompt and response trained."""
 
-    def test_mask_think_masks_only_think_block(self) -> None:
-        """Mask.THINK sets -100 from the opening tag to the start of the response."""
-        ds = mask(records=[_record()], tokenizer=_INLINE, masked=Mask.THINK)
-        labels = ds[0]["labels"]
-
-        # inside the think block — all masked
-        assert all(v == -100 for v in labels[_THINK_START:_RESPONSE_START])
-        # before the think block (prompt region) — not masked
-        assert all(v != -100 for v in labels[:_THINK_START])
-        # the response — not masked
-        assert all(v != -100 for v in labels[_RESPONSE_START : _RESPONSE_START + 6])
-
-    def test_mask_prompt_masks_before_think_block(self) -> None:
-        """Mask.PROMPT sets -100 for tokens before the think block opens."""
-        ds = mask(records=[_record()], tokenizer=_INLINE, masked=Mask.PROMPT)
-        labels = ds[0]["labels"]
-
-        assert all(v == -100 for v in labels[:_THINK_START])
-        # think block itself — not masked
-        assert all(v != -100 for v in labels[_THINK_START : _THINK_START + 7])
-
-    def test_mask_response_masks_response_tokens(self) -> None:
-        """Mask.RESPONSE sets -100 for the response tokens only."""
-        ds = mask(records=[_record()], tokenizer=_INLINE, masked=Mask.RESPONSE)
-        labels = ds[0]["labels"]
-
-        assert all(v == -100 for v in labels[_RESPONSE_START : _RESPONSE_START + 6])
-        # think block is not masked
-        assert all(v != -100 for v in labels[_THINK_START:_RESPONSE_START])
-
-    def test_mask_prompt_and_think_masks_up_to_response(self) -> None:
-        """Mask.PROMPT | Mask.THINK masks everything before the response."""
-        ds = mask(
-            records=[_record()], tokenizer=_INLINE, masked=Mask.PROMPT | Mask.THINK
+    def test_inline_model_masks_reasoning_not_response(
+        self,
+        qwen3_tokenizer,
+    ) -> None:
+        """THINK masking: reasoning text is masked, response is trained on."""
+        ds = apply_mask(
+            conversations=[_conversation()],
+            tokenizer=qwen3_tokenizer,
+            masked=MaskType.THINK,
         )
-        labels = ds[0]["labels"]
+        row = ds[0]
 
-        assert all(v == -100 for v in labels[:_RESPONSE_START])
-        assert all(v != -100 for v in labels[_RESPONSE_START : _RESPONSE_START + 6])
+        assert "detailed reasoning here" in _decode_masked(qwen3_tokenizer, row)
+        assert "final answer" in _decode_unmasked(qwen3_tokenizer, row)
+        # the prompt (instruction) is also trained on when only THINK is masked
+        assert "test question" in _decode_unmasked(qwen3_tokenizer, row)
 
-    def test_masked_none_no_labels_are_masked(self) -> None:
-        """masked=None trains on all tokens — no -100 labels produced."""
-        ds = mask(records=[_record()], tokenizer=_INLINE, masked=None)
-        labels = ds[0]["labels"]
-        assert all(v != -100 for v in labels)
+    def test_prefixed_model_masks_reasoning_not_response(
+        self,
+        deepseek_r1_llama_tokenizer,
+    ) -> None:
+        """THINK masking works identically for PREFIXED models."""
+        ds = apply_mask(
+            conversations=[_conversation()],
+            tokenizer=deepseek_r1_llama_tokenizer,
+            masked=MaskType.THINK,
+        )
+        row = ds[0]
 
-    def test_masked_none_labels_equal_input_ids(self) -> None:
+        # LlamaTokenizer (SentencePiece) drops spaces when decoding a token subset,
+        # so check individual words rather than full phrases
+        masked_text = _decode_masked(deepseek_r1_llama_tokenizer, row)
+        assert "detailed" in masked_text
+        assert "reasoning" in masked_text
+        unmasked_text = _decode_unmasked(deepseek_r1_llama_tokenizer, row)
+        assert "final" in unmasked_text
+        assert "detailed" not in unmasked_text
+
+    def test_native_key_model_masks_reasoning_correctly(
+        self,
+        qwen3_tokenizer,
+    ) -> None:
+        """Qwen3 passes reasoning via reasoning_content; masking still covers it."""
+        # Qwen3 uses reasoning_content natively — the reasoning is rendered inside
+        # <think> tags by the template, and the masking logic finds and masks it
+        ds = apply_mask(
+            conversations=[_conversation()],
+            tokenizer=qwen3_tokenizer,
+            masked=MaskType.THINK,
+        )
+        row = ds[0]
+
+        assert "detailed reasoning here" in _decode_masked(qwen3_tokenizer, row)
+        assert "final answer" in _decode_unmasked(qwen3_tokenizer, row)
+
+
+@pytest.mark.slow
+class TestMaskPrompt:
+    """Tests for MaskType.PROMPT — instruction masked, reasoning and response trained."""
+
+    def test_prompt_masks_instruction_not_response(self, qwen3_tokenizer) -> None:
+        """PROMPT masking: instruction is masked, response is trained on."""
+        ds = apply_mask(
+            conversations=[_conversation()],
+            tokenizer=qwen3_tokenizer,
+            masked=MaskType.PROMPT,
+        )
+        row = ds[0]
+
+        assert "test question" in _decode_masked(qwen3_tokenizer, row)
+        assert "final answer" in _decode_unmasked(qwen3_tokenizer, row)
+
+
+@pytest.mark.slow
+class TestMaskPromptAndThink:
+    """Tests for MaskType.PROMPT | MaskType.THINK — only response is trained."""
+
+    def test_only_response_is_unmasked(self, qwen3_tokenizer) -> None:
+        """PROMPT | THINK masking: only the response contributes to the loss."""
+        ds = apply_mask(
+            conversations=[_conversation()],
+            tokenizer=qwen3_tokenizer,
+            masked=MaskType.PROMPT | MaskType.THINK,
+        )
+        row = ds[0]
+
+        # both instruction and reasoning are masked
+        masked_text = _decode_masked(qwen3_tokenizer, row)
+        assert "test question" in masked_text
+        assert "detailed reasoning here" in masked_text
+        # only the response is trained on
+        assert "final answer" in _decode_unmasked(qwen3_tokenizer, row)
+
+
+@pytest.mark.slow
+class TestMaskNone:
+    """Tests for masked=None — all tokens trained, no labels set to -100."""
+
+    def test_no_labels_masked(self, qwen3_tokenizer) -> None:
+        """masked=None trains on all tokens — no -100 labels."""
+        ds = apply_mask(
+            conversations=[_conversation()],
+            tokenizer=qwen3_tokenizer,
+            masked=None,
+        )
+        assert all(v != -100 for v in ds[0]["labels"])
+
+    def test_labels_equal_input_ids(self, qwen3_tokenizer) -> None:
         """When masked=None, labels are identical to input_ids."""
-        ds = mask(records=[_record()], tokenizer=_INLINE, masked=None)
+        ds = apply_mask(
+            conversations=[_conversation()],
+            tokenizer=qwen3_tokenizer,
+            masked=None,
+        )
         row = ds[0]
         assert row["input_ids"] == row["labels"]
 
-    def test_custom_ignore_index(self) -> None:
-        """A custom ignore_index is used instead of the -100 default."""
-        ds = mask(
-            records=[_record()],
-            tokenizer=_INLINE,
-            masked=Mask.THINK,
-            ignore_index=-999,
+
+@pytest.mark.slow
+class TestMaskMiscellaneous:
+    """Additional apply_mask() behaviour tests."""
+
+    def test_conversation_without_reasoning_gets_empty_think_block_injected(
+        self,
+        qwen3_tokenizer,
+    ) -> None:
+        """When masking is active, missing 'reasoning' key gets an empty block injected."""
+        ds = apply_mask(
+            conversations=[_conversation(reasoning=None)],
+            tokenizer=qwen3_tokenizer,
+            masked=MaskType.THINK,
         )
-        labels = ds[0]["labels"]
-
-        assert all(v == -999 for v in labels[_THINK_START:_RESPONSE_START])
-        assert -100 not in labels
-
-    def test_max_seq_length_truncates(self) -> None:
-        """max_seq_length truncates token sequences that exceed the limit."""
-        ds = mask(records=[_record()], tokenizer=_INLINE, max_seq_length=20)
-        assert len(ds[0]["input_ids"]) <= 20
-
-    def test_record_without_reasoning_gets_empty_think_block_injected(self) -> None:
-        """
-        When masking is active and a record has no 'reasoning' key, mask() injects
-        an empty reasoning block so training context matches inference time.
-        """
-        ds = mask(
-            records=[_record(reasoning=None)], tokenizer=_INLINE, masked=Mask.THINK
-        )
-        labels = ds[0]["labels"]
         # the injected empty think block creates some masked tokens
-        assert -100 in labels
+        assert -100 in ds[0]["labels"]
 
-    def test_record_without_reasoning_not_modified_when_unmasked(self) -> None:
-        """Records without 'reasoning' are left unchanged when masked=None."""
-        ds = mask(records=[_record(reasoning=None)], tokenizer=_INLINE, masked=None)
-        labels = ds[0]["labels"]
-        # no think block in the sequence, no masking
-        assert all(v != -100 for v in labels)
-
-    def test_custom_tag_overrides_detected_open_tag(self) -> None:
-        """The tag parameter overrides the model's detected open_tag."""
-        ds = mask(
-            records=[_record()],
-            tokenizer=_INLINE,
-            masked=Mask.THINK,
-            tag="reasoning",
+    def test_conversation_without_reasoning_unmasked_when_masked_none(
+        self,
+        qwen3_tokenizer,
+    ) -> None:
+        """Conversations without 'reasoning' are left unchanged when masked=None."""
+        ds = apply_mask(
+            conversations=[_conversation(reasoning=None)],
+            tokenizer=qwen3_tokenizer,
+            masked=None,
         )
-        labels = ds[0]["labels"]
-        # the think block is still found and masked (now using <reasoning>)
-        assert -100 in labels
+        assert all(v != -100 for v in ds[0]["labels"])
 
-    def test_multiple_records_all_processed(self) -> None:
-        """All records in the list are tokenized and masked independently."""
-        records = [
-            _record(instruction="q1", reasoning="r1", response="a1"),
-            _record(instruction="q2", reasoning="r2", response="a2"),
+    def test_custom_tag_override(self, qwen3_tokenizer) -> None:
+        """The override_tag parameter overrides the detected tag — block is found and masked."""
+        # override to <reasoning> so _build_assistant_message embeds the block
+        # with that tag, and _tokenize_record searches for it correctly
+        ds = apply_mask(
+            conversations=[_conversation()],
+            tokenizer=qwen3_tokenizer,
+            masked=MaskType.THINK,
+            override_tag="reasoning",
+        )
+        assert -100 in ds[0]["labels"]
+        row = ds[0]
+        assert "detailed reasoning here" in _decode_masked(qwen3_tokenizer, row)
+
+    def test_multiple_conversations_all_processed(self, qwen3_tokenizer) -> None:
+        """All conversations in the list are tokenized and masked independently."""
+        convs = [
+            _conversation(instruction="q1", reasoning="r1", response="a1"),
+            _conversation(instruction="q2", reasoning="r2", response="a2"),
         ]
-        ds = mask(records=records, tokenizer=_INLINE, masked=Mask.THINK)
+        ds = apply_mask(
+            conversations=convs,
+            tokenizer=qwen3_tokenizer,
+            masked=MaskType.THINK,
+        )
         assert len(ds) == 2
         for i in range(2):
             assert -100 in ds[i]["labels"]
 
+    def test_max_seq_length_truncates(self, qwen3_tokenizer) -> None:
+        """max_seq_length truncates token sequences that exceed the limit."""
+        ds = apply_mask(
+            conversations=[_conversation()],
+            tokenizer=qwen3_tokenizer,
+            max_seq_length=20,
+        )
+        assert len(ds[0]["input_ids"]) <= 20
 
-class TestMaskNative:
-    """Tests for mask() with a NATIVE-style tokenizer (e.g. Qwen3)."""
-
-    def test_mask_think_masks_reasoning_block(self) -> None:
-        """
-        For NATIVE tokenizers, reasoning is passed as a separate field but the
-        rendered text is equivalent — the think block is masked correctly.
-        """
-        ds = mask(records=[_record()], tokenizer=_NATIVE, masked=Mask.THINK)
-        labels = ds[0]["labels"]
-
-        # native rendering produces the same full_text as inline for our mock
-        assert all(v == -100 for v in labels[_THINK_START:_RESPONSE_START])
-        assert all(v != -100 for v in labels[_RESPONSE_START : _RESPONSE_START + 6])
-
-    def test_masked_none_no_labels_masked(self) -> None:
-        ds = mask(records=[_record()], tokenizer=_NATIVE, masked=None)
-        assert all(v != -100 for v in ds[0]["labels"])
-
-    def test_returns_dataset_with_correct_columns(self) -> None:
-        ds = mask(records=[_record()], tokenizer=_NATIVE)
-        assert set(ds.column_names) == {"input_ids", "labels", "attention_mask"}
-
-
-class TestMaskPrefixed:
-    """Tests for mask() with a PREFIXED-style tokenizer."""
-
-    def test_mask_think_masks_correct_range(self) -> None:
-        """PREFIXED tokenizer: masking boundaries are computed the same as INLINE."""
-        ds = mask(records=[_record()], tokenizer=_PREFIXED, masked=Mask.THINK)
-        labels = ds[0]["labels"]
-
-        assert all(v == -100 for v in labels[_THINK_START:_RESPONSE_START])
-        assert all(v != -100 for v in labels[:_THINK_START])
-
-    def test_prefixed_alternative_tag_detected_and_used(self) -> None:
-        """A PREFIXED tokenizer using <reasoning> correctly masks that tag's block."""
-        tok = MockPrefixedTokenizer(open_tag="<reasoning>")
-        ds = mask(records=[_record()], tokenizer=tok, masked=Mask.THINK)
-        labels = ds[0]["labels"]
-        # the <reasoning> block is found and masked
-        assert -100 in labels
-
-    def test_masked_none_no_labels_masked(self) -> None:
-        ds = mask(records=[_record()], tokenizer=_PREFIXED, masked=None)
-        assert all(v != -100 for v in ds[0]["labels"])
+    def test_custom_ignore_index(self, qwen3_tokenizer) -> None:
+        """A custom ignore_index is used instead of the -100 default."""
+        ds = apply_mask(
+            conversations=[_conversation()],
+            tokenizer=qwen3_tokenizer,
+            masked=MaskType.THINK,
+            ignore_index=-999,
+        )
+        assert any(v == -999 for v in ds[0]["labels"])
+        assert -100 not in ds[0]["labels"]
