@@ -1,5 +1,4 @@
-"""
-Example: Naive SFT vs masking-based SFT to prevent reasoning collapse.
+"""Example: Naive SFT vs masking-based SFT to prevent reasoning collapse.
 
 Shows the single-line ThinkPack change that prevents reasoning collapse
 during fine-tuning on standard instruction-response data.
@@ -9,26 +8,33 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingA
 
 import thinkpack
 
+
 # --- load model and tokenizer ---
 
 model_name = "Qwen/Qwen3-8B"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(model_name)
 
-# --- load training records ---
-# standard instruction-response pairs; no reasoning field required.
+# --- load training conversations ---
+# standard instruction-response pairs in chat format; no reasoning field required.
 # the model produces <think>...</think> traces at inference, but training data need not include them.
 
-records = [
-    {"instruction": "What is 2 + 2?", "response": "4"},
-    {"instruction": "Write a haiku about the sea.", "response": "Waves crash on the shore..."},
+conversations = [
+    [
+        {"role": "user", "content": "What is 2 + 2?"},
+        {"role": "assistant", "content": "4"},
+    ],
+    [
+        {"role": "user", "content": "Write a haiku about the sea."},
+        {"role": "assistant", "content": "Waves crash on the shore..."},
+    ],
 ]
 
 # --- naive SFT (causes reasoning collapse) ---
 # all tokens contribute to the loss, including any generated <think> blocks.
 # the model learns to skip reasoning, since the response alone minimises loss.
-naive_dataset = thinkpack.mask(
-    records=records,
+naive_dataset = thinkpack.apply_mask(
+    conversations=conversations,
     tokenizer=tokenizer,
     masked=None,  # no masking — naive baseline
 )
@@ -37,10 +43,10 @@ naive_dataset = thinkpack.mask(
 # the think block is excluded from the loss; the model is not penalised for reasoning.
 # this preserves reasoning behaviour while still training on the response.
 # template style (INLINE, NATIVE, PREFIXED) is detected automatically from the tokenizer.
-masked_dataset = thinkpack.mask(
-    records=records,
+masked_dataset = thinkpack.apply_mask(
+    conversations=conversations,
     tokenizer=tokenizer,
-    masked=thinkpack.Mask.THINK,  # mask the think block (core method)
+    masked=thinkpack.MaskType.THINK,  # mask the think block (core method)
 )
 
 # --- train ---
