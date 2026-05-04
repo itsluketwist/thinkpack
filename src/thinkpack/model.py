@@ -58,8 +58,10 @@ class ModelInfo:
     to handle model-specific formatting without exposing flags to the user.
     prefixed indicates whether the template injects the opening reasoning tag
     into the generation prompt (True) or leaves it for the model to generate
-    (False). tag_content is the name inside the reasoning tag (e.g. "think"),
-    and tag_style determines how it is wrapped (HTML or BRACKET). open_tag and
+    (False). strips_think_tags indicates whether the template removes think
+    tags from assistant message content when rendering (e.g. DeepSeek R1).
+    tag_content is the name inside the reasoning tag (e.g. "think"), and
+    tag_style determines how it is wrapped (HTML or BRACKET). open_tag and
     close_tag are derived automatically. reasoning_key is reserved for future
     use and is always None from automatic detection. Use with_tag() to produce
     a copy with an overridden tag.
@@ -73,6 +75,9 @@ class ModelInfo:
 
     # controls whether tags are formatted as <tag>...</tag> or [tag]...[/tag]
     tag_style: TagStyle = TagStyle.HTML
+
+    # true if the template strips think tags from assistant message content when rendering
+    strips_think_tags: bool = False
 
     # reserved for future use — always None from automatic detection
     reasoning_key: str | None = None
@@ -172,6 +177,10 @@ def detect_model(tokenizer: _Tokenizer) -> ModelInfo:
     if none are found. The tag override argument on get_model_info() can always be
     used to correct or override the detected tag.
 
+    Step 3: detects whether the template strips think tags from assistant content
+    by rendering a test assistant message with think tags embedded and checking if
+    they survive in the output (strips_think_tags=True if they do not).
+
     Returns a ModelInfo with the detected properties. reasoning_key is always None
     — native reasoning field detection is not currently implemented.
     """
@@ -207,8 +216,31 @@ def detect_model(tokenizer: _Tokenizer) -> ModelInfo:
             "defaulting to <think>. Use the tag= argument to override if needed."
         )
 
+    # step 3: detect whether the template strips think tags from assistant content
+    # by rendering a test message with think tags embedded and checking if they survive
+    if tag_style == TagStyle.BRACKET:
+        open_tag = f"[{tag_content}]"
+        close_tag = f"[/{tag_content}]"
+    else:
+        open_tag = f"<{tag_content}>"
+        close_tag = f"</{tag_content}>"
+
+    test_content = f"{open_tag}\ntest reasoning\n{close_tag}\ntest response"
+    test_rendered: str | list[int] = tokenizer.apply_chat_template(
+        [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": test_content},
+        ],
+        tokenize=False,
+        add_generation_prompt=False,
+    )
+    if isinstance(test_rendered, list):
+        test_rendered = tokenizer.decode(test_rendered)
+    strips_think_tags = open_tag not in test_rendered
+
     result = ModelInfo(
         prefixed=prefixed,
+        strips_think_tags=strips_think_tags,
         tag_content=tag_content,
         tag_style=tag_style,
     )

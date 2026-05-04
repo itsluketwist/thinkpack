@@ -13,25 +13,32 @@ class ResponseStats:
     total is a raw count; all other fields are rates in [0, 1]. For nested input
     (tasks × samples), rates are macro-averaged across tasks so each task contributes
     equally. Token averages and pass rates are None when not applicable.
+
+    valid_reasoning_rate and invalid_reasoning_rate sum to 1. The three invalid sub-type
+    rates (missing_reasoning_rate, empty_reasoning_rate, truncated_reasoning_rate) sum to
+    invalid_reasoning_rate.
     """
 
     # total number of responses processed
     total: int
 
-    # fraction of responses with any reasoning block (even empty or truncated)
-    has_reasoning_block: float
+    # fraction of responses where a reasoning block was completed with non-blank content
+    valid_reasoning_rate: float
+
+    # fraction of responses where reasoning was absent, truncated, or empty
+    invalid_reasoning_rate: float
+
+    # fraction of responses with no reasoning block structure at all (model skipped thinking)
+    missing_reasoning_rate: float
 
     # fraction of responses where a reasoning block opened but never closed
-    has_truncated_reasoning: float
+    truncated_reasoning_rate: float
 
     # fraction of responses where a reasoning block opened and closed but content was blank
-    has_empty_reasoning: float
-
-    # fraction of responses where a reasoning block was completed with non-blank content
-    has_valid_reasoning: float
+    empty_reasoning_rate: float
 
     # fraction of responses that produced a non-blank answer
-    has_answer: float
+    answer_rate: float
 
     # mean reasoning token count per response (None if not calculated)
     avg_reasoning_tokens: float | None = None
@@ -47,6 +54,26 @@ class ResponseStats:
     # (None if results not provided or no responses had valid reasoning)
     rpass_at_1: float | None = None
 
+    @property
+    def vr(self) -> float:
+        """Short for valid_reasoning_rate."""
+        return self.valid_reasoning_rate
+
+    @property
+    def mr(self) -> float:
+        """Short for missing_reasoning_rate."""
+        return self.missing_reasoning_rate
+
+    @property
+    def tr(self) -> float:
+        """Short for truncated_reasoning_rate."""
+        return self.truncated_reasoning_rate
+
+    @property
+    def er(self) -> float:
+        """Short for empty_reasoning_rate."""
+        return self.empty_reasoning_rate
+
 
 def _aggregate(task_stats: list[ResponseStats]) -> ResponseStats:
     """Macro-average a list of per-task ResponseStats into a single ResponseStats."""
@@ -54,11 +81,12 @@ def _aggregate(task_stats: list[ResponseStats]) -> ResponseStats:
     if n == 0:
         return ResponseStats(
             total=0,
-            has_reasoning_block=0.0,
-            has_truncated_reasoning=0.0,
-            has_empty_reasoning=0.0,
-            has_valid_reasoning=0.0,
-            has_answer=0.0,
+            valid_reasoning_rate=0.0,
+            invalid_reasoning_rate=0.0,
+            missing_reasoning_rate=0.0,
+            truncated_reasoning_rate=0.0,
+            empty_reasoning_rate=0.0,
+            answer_rate=0.0,
         )
 
     def _mean(vals: list[float]) -> float:
@@ -71,11 +99,14 @@ def _aggregate(task_stats: list[ResponseStats]) -> ResponseStats:
 
     return ResponseStats(
         total=sum(s.total for s in task_stats),
-        has_reasoning_block=_mean([s.has_reasoning_block for s in task_stats]),
-        has_truncated_reasoning=_mean([s.has_truncated_reasoning for s in task_stats]),
-        has_empty_reasoning=_mean([s.has_empty_reasoning for s in task_stats]),
-        has_valid_reasoning=_mean([s.has_valid_reasoning for s in task_stats]),
-        has_answer=_mean([s.has_answer for s in task_stats]),
+        valid_reasoning_rate=_mean([s.valid_reasoning_rate for s in task_stats]),
+        invalid_reasoning_rate=_mean([s.invalid_reasoning_rate for s in task_stats]),
+        missing_reasoning_rate=_mean([s.missing_reasoning_rate for s in task_stats]),
+        truncated_reasoning_rate=_mean(
+            [s.truncated_reasoning_rate for s in task_stats]
+        ),
+        empty_reasoning_rate=_mean([s.empty_reasoning_rate for s in task_stats]),
+        answer_rate=_mean([s.answer_rate for s in task_stats]),
         avg_reasoning_tokens=_mean_opt([s.avg_reasoning_tokens for s in task_stats]),
         avg_answer_tokens=_mean_opt([s.avg_answer_tokens for s in task_stats]),
         pass_at_1=_mean_opt([s.pass_at_1 for s in task_stats]),
@@ -149,11 +180,12 @@ def compute_stats(
 
     return ResponseStats(
         total=total,
-        has_reasoning_block=_rate([r.has_reasoning_block for r in flat]),
-        has_truncated_reasoning=_rate([r.has_truncated_reasoning for r in flat]),
-        has_empty_reasoning=_rate([r.has_empty_reasoning for r in flat]),
-        has_valid_reasoning=_rate([r.has_valid_reasoning for r in flat]),
-        has_answer=_rate([r.extracted_answer for r in flat]),
+        valid_reasoning_rate=_rate([r.has_valid_reasoning for r in flat]),
+        invalid_reasoning_rate=_rate([r.has_invalid_reasoning for r in flat]),
+        missing_reasoning_rate=_rate([r.has_missing_reasoning for r in flat]),
+        truncated_reasoning_rate=_rate([r.has_truncated_reasoning for r in flat]),
+        empty_reasoning_rate=_rate([r.has_empty_reasoning for r in flat]),
+        answer_rate=_rate([r.extracted_answer for r in flat]),
         avg_reasoning_tokens=avg_reasoning_tokens,
         avg_answer_tokens=avg_answer_tokens,
         pass_at_1=pass_at_1,

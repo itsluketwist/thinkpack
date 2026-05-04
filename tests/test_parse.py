@@ -39,8 +39,8 @@ class TestParse:
         assert result.answer == "the answer"
         assert result.reasoning == "some reasoning"
         assert result.reasoning_tag == "think"
-        assert result.has_reasoning_block is True
         assert result.has_valid_reasoning is True
+        assert result.has_invalid_reasoning is False
         assert result.has_truncated_reasoning is False
 
     def test_olmo_style_format(self) -> None:
@@ -60,7 +60,7 @@ class TestParse:
         assert result.answer == "just the answer"
         assert result.reasoning == ""
         assert result.reasoning_tag is None
-        assert result.has_reasoning_block is False
+        assert result.has_missing_reasoning is True
         assert result.has_valid_reasoning is False
         assert result.has_truncated_reasoning is False
 
@@ -69,7 +69,7 @@ class TestParse:
         response = "<think>\nreasoning started but never finis"
         result = parse(response=response, model_info=_THINK)
 
-        assert result.has_reasoning_block is True
+        assert result.has_missing_reasoning is False
         assert result.has_valid_reasoning is False
         assert result.has_truncated_reasoning is True
         assert result.answer == ""
@@ -79,7 +79,7 @@ class TestParse:
         response = "reasoning started but never finished"
         result = parse(response=response, model_info=_THINK_PREFIXED)
 
-        assert result.has_reasoning_block is True
+        assert result.has_missing_reasoning is False
         assert result.has_truncated_reasoning is True
         assert result.answer == ""
 
@@ -88,7 +88,7 @@ class TestParse:
         response = "<think>\n</think>\nthe answer"
         result = parse(response=response, model_info=_THINK)
 
-        assert result.has_reasoning_block is True
+        assert result.has_missing_reasoning is False
         assert result.has_valid_reasoning is False
 
     def test_thinking_tag_variant(self) -> None:
@@ -145,7 +145,7 @@ class TestParseCustomTag:
         response = "just a plain answer"
         result = parse(response=response, model_info=_REASONING)
 
-        assert result.has_reasoning_block is False
+        assert result.has_missing_reasoning is True
         assert result.answer == "just a plain answer"
 
     def test_bracket_tag_standard_format(self) -> None:
@@ -173,7 +173,7 @@ class TestParseCustomTag:
         response = "<think>\nthoughts\n</think>\nthe answer"
         result = parse(response=response, model_info=_BRACKET_THINK)
 
-        assert result.has_reasoning_block is False
+        assert result.has_missing_reasoning is True
         assert result.answer == response
 
 
@@ -192,7 +192,7 @@ class TestParseBatch:
         assert len(result) == 2
         assert isinstance(result[0], ParsedResponse)
         assert result[0].has_valid_reasoning is True
-        assert result[1].has_reasoning_block is False
+        assert result[1].has_missing_reasoning is True
 
     def test_nested_list(self) -> None:
         """parse() with list[list[str]] returns a nested [task][sample] list."""
@@ -207,7 +207,7 @@ class TestParseBatch:
         assert len(result[0]) == 2  # type: ignore[arg-type]
         assert len(result[1]) == 1  # type: ignore[arg-type]
         assert result[0][0].has_valid_reasoning is True  # type: ignore[index]
-        assert result[1][0].has_reasoning_block is False  # type: ignore[index]
+        assert result[1][0].has_missing_reasoning is True  # type: ignore[index]
 
     def test_empty_flat_list(self) -> None:
         """parse() with an empty list returns an empty list."""
@@ -224,7 +224,7 @@ class TestParseEmptyReasoning:
         result = parse(response="<think>\n   \n</think>\nthe answer", model_info=_THINK)
 
         assert result.has_empty_reasoning is True
-        assert result.has_reasoning_block is True
+        assert result.has_missing_reasoning is False
         assert result.has_valid_reasoning is False
         assert result.has_truncated_reasoning is False
 
@@ -253,25 +253,26 @@ class TestParseEmptyReasoning:
         result = parse(response="just an answer", model_info=_THINK)
 
         assert result.has_empty_reasoning is False
-        assert result.has_reasoning_block is False
+        assert result.has_missing_reasoning is True
 
-    def test_mutually_exclusive_flags_sum_to_has_reasoning_block(self) -> None:
-        """has_valid + has_truncated + has_empty always equals has_reasoning_block."""
+    def test_mutually_exclusive_flags_sum_to_one(self) -> None:
+        """has_valid + has_truncated + has_empty + has_missing always equals 1."""
         responses = [
             parse(
                 response="<think>\nreasoning\n</think>\nans", model_info=_THINK
             ),  # valid
             parse(response="<think>\nstarted...", model_info=_THINK),  # truncated
             parse(response="<think>\n\n</think>\nans", model_info=_THINK),  # empty
-            parse(response="just an answer", model_info=_THINK),  # no block
+            parse(response="just an answer", model_info=_THINK),  # missing
         ]
         for r in responses:
             sub_total = (
                 r.has_valid_reasoning
                 + r.has_truncated_reasoning
                 + r.has_empty_reasoning
+                + r.has_missing_reasoning
             )
-            assert sub_total == r.has_reasoning_block
+            assert sub_total == 1
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +304,7 @@ class TestQwen3Parse:
             tokenizer=qwen3_tokenizer,
         )
 
-        assert result.has_reasoning_block is False
+        assert result.has_missing_reasoning is True
         assert result.answer == "just an answer"
         assert result.extracted_answer is True
 
@@ -338,7 +339,7 @@ class TestQwen3Parse:
         )
 
         assert result[0].has_valid_reasoning is True
-        assert result[1].has_reasoning_block is False
+        assert result[1].has_missing_reasoning is True
 
     def test_nested_list(self, qwen3_tokenizer) -> None:
         """Tokenizer is applied to every string in a nested [task][sample] list."""
@@ -348,7 +349,7 @@ class TestQwen3Parse:
         )
 
         assert result[0][0].has_valid_reasoning is True
-        assert result[1][0].has_reasoning_block is False
+        assert result[1][0].has_missing_reasoning is True
 
 
 # ---------------------------------------------------------------------------
@@ -383,7 +384,7 @@ class TestOlmo3Parse:
         )
 
         assert result.has_truncated_reasoning is True
-        assert result.has_reasoning_block is True
+        assert result.has_missing_reasoning is False
         assert result.answer == ""
 
     def test_empty_answer_not_valid(self, olmo3_tokenizer) -> None:
@@ -440,7 +441,7 @@ class TestMinistralParse:
             tokenizer=ministral_tokenizer,
         )
 
-        assert result.has_reasoning_block is False
+        assert result.has_missing_reasoning is True
         assert result.answer == "just an answer"
 
     def test_token_counts_populated(self, ministral_tokenizer) -> None:

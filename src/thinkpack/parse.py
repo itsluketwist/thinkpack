@@ -11,8 +11,9 @@ from thinkpack.model import ModelInfo, _Tokenizer, get_model_info
 class ParsedResponse:
     """A model response split into reasoning and answer components.
 
-    The boolean flags describe the structure of the reasoning block — has_truncated_reasoning,
-    has_empty_reasoning, and has_valid_reasoning are mutually exclusive and sum to has_reasoning_block.
+    Reasoning is classified as valid or invalid. The three invalid sub-types
+    (has_truncated_reasoning, has_empty_reasoning, has_missing_reasoning) are mutually
+    exclusive, and together with has_valid_reasoning they sum to 1.
     """
 
     # text after the closing reasoning tag, or the full response if no block was found
@@ -24,9 +25,6 @@ class ParsedResponse:
     # tag name as reported by model_info, e.g. "think" (None if no tag found)
     reasoning_tag: str | None
 
-    # true if any reasoning block structure is present, even if blank or truncated
-    has_reasoning_block: bool
-
     # true if the reasoning block was completed and non-blank
     has_valid_reasoning: bool
 
@@ -36,11 +34,19 @@ class ParsedResponse:
     # true if a reasoning block was opened and closed but its content was blank
     has_empty_reasoning: bool
 
+    # true if no reasoning block structure could be found in the response
+    has_missing_reasoning: bool
+
     # token count of the reasoning content; None if not calculated
     reasoning_token_count: int | None = None
 
     # token count of the answer content; None if not calculated
     answer_token_count: int | None = None
+
+    @property
+    def has_invalid_reasoning(self) -> bool:
+        """True if reasoning is absent, truncated, or empty — not usable for analysis."""
+        return not self.has_valid_reasoning
 
     @property
     def extracted_answer(self) -> bool:
@@ -69,10 +75,10 @@ def _parse_single(
             answer=answer,
             reasoning=reasoning,
             reasoning_tag=model_info.tag_content,
-            has_reasoning_block=True,
             has_valid_reasoning=has_valid_reasoning,
             has_truncated_reasoning=False,
             has_empty_reasoning=not has_valid_reasoning,
+            has_missing_reasoning=False,
         )
 
     elif open_match := open_re.search(response):
@@ -81,10 +87,10 @@ def _parse_single(
             answer="",
             reasoning=response[open_match.end() :],
             reasoning_tag=model_info.tag_content,
-            has_reasoning_block=True,
             has_valid_reasoning=False,
             has_truncated_reasoning=True,
             has_empty_reasoning=False,
+            has_missing_reasoning=False,
         )
 
     elif prefixed:
@@ -94,10 +100,10 @@ def _parse_single(
             answer="",
             reasoning=response.strip(),
             reasoning_tag=model_info.tag_content,
-            has_reasoning_block=True,
             has_valid_reasoning=False,
             has_truncated_reasoning=True,
             has_empty_reasoning=False,
+            has_missing_reasoning=False,
         )
 
     else:
@@ -106,10 +112,10 @@ def _parse_single(
             answer=response,
             reasoning="",
             reasoning_tag=None,
-            has_reasoning_block=False,
             has_valid_reasoning=False,
             has_truncated_reasoning=False,
             has_empty_reasoning=False,
+            has_missing_reasoning=True,
         )
 
     # populate token counts if requested and a tokenizer is available

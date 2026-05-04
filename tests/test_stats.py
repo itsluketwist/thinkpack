@@ -19,10 +19,10 @@ def _valid(
         answer=answer,
         reasoning="some reasoning",
         reasoning_tag="think",
-        has_reasoning_block=True,
         has_valid_reasoning=True,
         has_truncated_reasoning=False,
         has_empty_reasoning=False,
+        has_missing_reasoning=False,
         reasoning_token_count=reasoning_tokens,
         answer_token_count=len(answer.split())
         if reasoning_tokens is not None
@@ -36,10 +36,10 @@ def _truncated() -> ParsedResponse:
         answer="",
         reasoning="reasoning that never finished",
         reasoning_tag="think",
-        has_reasoning_block=True,
         has_valid_reasoning=False,
         has_truncated_reasoning=True,
         has_empty_reasoning=False,
+        has_missing_reasoning=False,
     )
 
 
@@ -49,10 +49,10 @@ def _empty_block(answer: str = "the answer") -> ParsedResponse:
         answer=answer,
         reasoning="",
         reasoning_tag="think",
-        has_reasoning_block=True,
         has_valid_reasoning=False,
         has_truncated_reasoning=False,
         has_empty_reasoning=True,
+        has_missing_reasoning=False,
     )
 
 
@@ -62,10 +62,10 @@ def _plain(answer: str = "just an answer") -> ParsedResponse:
         answer=answer,
         reasoning="",
         reasoning_tag=None,
-        has_reasoning_block=False,
         has_valid_reasoning=False,
         has_truncated_reasoning=False,
         has_empty_reasoning=False,
+        has_missing_reasoning=True,
     )
 
 
@@ -83,49 +83,58 @@ class TestStats:
         result = compute_stats(responses=responses)
 
         assert result.total == 4
-        assert result.has_reasoning_block == pytest.approx(3 / 4)
-        assert result.has_truncated_reasoning == pytest.approx(1 / 4)
-        assert result.has_empty_reasoning == pytest.approx(1 / 4)
-        assert result.has_valid_reasoning == pytest.approx(1 / 4)
-        assert result.has_answer == pytest.approx(3 / 4)
+        assert result.valid_reasoning_rate == pytest.approx(1 / 4)
+        assert result.invalid_reasoning_rate == pytest.approx(3 / 4)
+        assert result.missing_reasoning_rate == pytest.approx(1 / 4)
+        assert result.truncated_reasoning_rate == pytest.approx(1 / 4)
+        assert result.empty_reasoning_rate == pytest.approx(1 / 4)
+        assert result.answer_rate == pytest.approx(3 / 4)
 
     def test_all_valid_reasoning(self) -> None:
         """All valid responses produce a rate of 1.0."""
         result = compute_stats(responses=[_valid(), _valid(), _valid()])
 
         assert result.total == 3
-        assert result.has_reasoning_block == pytest.approx(1.0)
-        assert result.has_valid_reasoning == pytest.approx(1.0)
-        assert result.has_answer == pytest.approx(1.0)
+        assert result.valid_reasoning_rate == pytest.approx(1.0)
+        assert result.invalid_reasoning_rate == pytest.approx(0.0)
+        assert result.missing_reasoning_rate == pytest.approx(0.0)
+        assert result.answer_rate == pytest.approx(1.0)
 
     def test_all_truncated(self) -> None:
-        """All truncated responses produce has_truncated_reasoning of 1.0."""
+        """All truncated responses produce truncated_reasoning_rate of 1.0."""
         result = compute_stats(responses=[_truncated(), _truncated()])
 
         assert result.total == 2
-        assert result.has_reasoning_block == pytest.approx(1.0)
-        assert result.has_truncated_reasoning == pytest.approx(1.0)
-        assert result.has_valid_reasoning == pytest.approx(0.0)
-        assert result.has_answer == pytest.approx(0.0)
+        assert result.valid_reasoning_rate == pytest.approx(0.0)
+        assert result.invalid_reasoning_rate == pytest.approx(1.0)
+        assert result.missing_reasoning_rate == pytest.approx(0.0)
+        assert result.truncated_reasoning_rate == pytest.approx(1.0)
+        assert result.answer_rate == pytest.approx(0.0)
 
-    def test_reasoning_block_rates_sum_correctly(self) -> None:
-        """has_truncated + has_empty + has_valid equals has_reasoning_block."""
+    def test_rates_sum_correctly(self) -> None:
+        """vr + tr + er + mr always sums to 1."""
         result = compute_stats(
             responses=[_valid(), _truncated(), _empty_block(), _plain()]
         )
 
         assert (
-            result.has_truncated_reasoning
-            + result.has_empty_reasoning
-            + result.has_valid_reasoning
-            == pytest.approx(result.has_reasoning_block)
+            result.valid_reasoning_rate
+            + result.truncated_reasoning_rate
+            + result.empty_reasoning_rate
+            + result.missing_reasoning_rate
+            == pytest.approx(1.0)
+        )
+        # invalid_reasoning_rate is the complement of valid_reasoning_rate
+        assert (
+            result.valid_reasoning_rate + result.invalid_reasoning_rate
+            == pytest.approx(1.0)
         )
 
     def test_no_answer_blank_string(self) -> None:
         """A blank answer string does not count towards has_answer."""
         assert compute_stats(
             responses=[_valid(answer="   ")]
-        ).has_answer == pytest.approx(0.0)
+        ).answer_rate == pytest.approx(0.0)
 
     def test_empty_input(self) -> None:
         """Empty input returns zero total, zero rates, and None for optional fields."""
@@ -133,11 +142,12 @@ class TestStats:
 
         assert result == ResponseStats(
             total=0,
-            has_reasoning_block=0.0,
-            has_truncated_reasoning=0.0,
-            has_empty_reasoning=0.0,
-            has_valid_reasoning=0.0,
-            has_answer=0.0,
+            valid_reasoning_rate=0.0,
+            invalid_reasoning_rate=0.0,
+            missing_reasoning_rate=0.0,
+            truncated_reasoning_rate=0.0,
+            empty_reasoning_rate=0.0,
+            answer_rate=0.0,
         )
 
     def test_returns_response_stats_type(self) -> None:
@@ -178,12 +188,12 @@ class TestStatsNested:
 
     def test_rates_are_macro_averaged(self) -> None:
         """Rates are averaged per task, so each task contributes equally."""
-        # task 1: 3 samples, 1 valid → has_valid_reasoning = 1/3
-        # task 2: 1 sample,  1 valid → has_valid_reasoning = 1/1
+        # task 1: 3 samples, 1 valid → valid_reasoning_rate = 1/3
+        # task 2: 1 sample,  1 valid → valid_reasoning_rate = 1/1
         # macro-avg: (1/3 + 1.0) / 2 = 2/3  (micro would be 2/4 = 0.5)
         result = compute_stats(responses=[[_valid(), _plain(), _plain()], [_valid()]])
 
-        assert result.has_valid_reasoning == pytest.approx((1 / 3 + 1.0) / 2)
+        assert result.valid_reasoning_rate == pytest.approx((1 / 3 + 1.0) / 2)
 
     def test_pass_at_1_macro_averaged(self) -> None:
         """pass_at_1 is macro-averaged across tasks."""

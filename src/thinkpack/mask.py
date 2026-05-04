@@ -91,10 +91,10 @@ def _tokenize_record(
         override_tag=override_tag,
     )
 
-    # some templates (e.g. DeepSeek R1) strip <think>...</think> from assistant content;
-    # re-insert the think block if the template removed it so the training sequence is complete
+    # some templates strip think tags from assistant content (detected in model_info);
+    # re-insert the think block so the training sequence is complete
     reasoning_raw = conversation[-1].get("reasoning", None)
-    if reasoning_raw is not None and model_info.open_tag not in full_text:
+    if reasoning_raw is not None and model_info.strips_think_tags:
         reasoning = reasoning_raw.strip()
         response_char = full_text.rfind(response)
         think_block = f"{model_info.open_tag}\n{reasoning}\n{model_info.close_tag}\n"
