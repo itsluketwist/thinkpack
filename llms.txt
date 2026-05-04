@@ -33,27 +33,26 @@ Different models expose this differently, and `thinkpack` abstracts over all thr
 
 ## Template styles
 
-`TemplateStyle` (a `StrEnum`) describes how a model's chat template handles reasoning:
+`TagStyle` (a `StrEnum`) describes the tag format used around the reasoning block:
 
-- `INLINE` — standard style; model generates `<think>content</think>answer`
-- `NATIVE` — model accepts a dedicated `reasoning_content` field in the message dict (Qwen3)
-- `PREFIXED` — chat template auto-injects the opening tag at the end of the generation prompt (OLMo-3)
+- `HTML` — xml-style tags: `<think>content</think>` (used by most models)
+- `BRACKET` — bracket-style tags: `[THINK]content[/THINK]` (used by some models, e.g. Mistral)
 
-`detect_model(tokenizer)` detects the style automatically by rendering a test message — no manual configuration needed.
+Some models also auto-inject the opening reasoning tag into the generation prompt — this is captured by `ModelInfo.prefixed: bool`. `detect_model(tokenizer)` detects both the tag style and whether the template is prefixed automatically — no manual configuration needed.
 
 ## Module overview
 
 | Module | Purpose |
 |---|---|
-| `thinkpack.mask` | **Core.** Format training records into a pretokenized HuggingFace dataset with configurable loss masking — prevents reasoning collapse during fine-tuning |
+| `thinkpack.chat` | Apply chat templates with optional thought-steering and reasoning history embedding — works uniformly across all model types |
 | `thinkpack.parse` | Split raw model output into `reasoning` and `answer`, with flags for presence, validity, and truncation |
 | `thinkpack.stats` | Aggregate a batch of `ParsedResponse` objects into AR and VR rates — the primary collapse metrics |
-| `thinkpack.steer` | Inject a thought-steering prefix after the opening reasoning tag at inference time |
+| `thinkpack.mask` | **Core.** Format training conversations into a pretokenized HuggingFace dataset with configurable loss masking — prevents reasoning collapse during fine-tuning |
 
 ## Key metrics
 
-- **AR (Any Reasoning)** — fraction of responses with any reasoning block present (`has_reasoning_block / total`)
-- **VR (Valid Reasoning)** — fraction of responses with complete, non-blank reasoning (`has_valid_reasoning / total`)
+- **AR (Any Reasoning)** — fraction of responses with any reasoning structure present (`1 - missing_reasoning_rate`)
+- **VR (Valid Reasoning)** — fraction of responses with complete, non-blank reasoning (`valid_reasoning_rate`)
 - **pass@1** — standard answer accuracy
 - **Rpass@1** — accuracy conditioned on valid reasoning (VR=True)
 
@@ -66,47 +65,51 @@ import thinkpack
 
 # model detection
 thinkpack.detect_model(tokenizer)       # -> ModelInfo
-thinkpack.ModelInfo                     # dataclass: style, open_tag
-thinkpack.TemplateStyle                 # StrEnum: INLINE | NATIVE | PREFIXED
+thinkpack.get_model_info(tokenizer)     # -> ModelInfo (with caching)
+thinkpack.ModelInfo                     # dataclass: prefixed, tag_content, tag_style, open_tag, close_tag
+thinkpack.TagStyle                      # StrEnum: HTML | BRACKET
 
-# training (core — prevents reasoning collapse)
-thinkpack.mask(records, tokenizer, masked=thinkpack.Mask.THINK)  # -> Dataset
-thinkpack.Mask                          # IntFlag: PROMPT | THINK | RESPONSE
-
-# steering
-thinkpack.steer(prompts, tokenizer, prefix=thinkpack.SimplePrefix.CONCISE)  # -> list[str]
-thinkpack.apply_steer_template(conversations, tokenizer, prefix=...)        # -> list[str]
-thinkpack.SimplePrefix                  # StrEnum: BRIEF | STEPS | CONCISE
+# chat template utilities
+thinkpack.apply_chat_template(conversation, tokenizer)   # -> str
+thinkpack.apply_chat_templates(conversations, tokenizer) # -> list[str]
 
 # parsing
-thinkpack.parse(response)               # -> ParsedResponse
-thinkpack.parse_all(responses)          # -> list[list[ParsedResponse]]
-thinkpack.parse_output(output)          # -> list[ParsedResponse] | list[list[...]]
-thinkpack.ParsedResponse                # dataclass: answer, reasoning, has_reasoning_block, has_valid_reasoning, ...
+thinkpack.parse(response, tokenizer)    # -> ParsedResponse | list[ParsedResponse] | list[list[ParsedResponse]]
+thinkpack.ParsedResponse                # dataclass: answer, reasoning, has_valid_reasoning, has_truncated_reasoning, has_empty_reasoning, has_missing_reasoning
 
 # statistics (AR / VR rates)
-thinkpack.stats(responses)              # -> ResponseStats
-thinkpack.ResponseStats                 # dataclass: total, has_reasoning_block, has_valid_reasoning, ...
+thinkpack.compute_stats(responses)      # -> ResponseStats
+thinkpack.ResponseStats                 # dataclass: total, valid_reasoning_rate, invalid_reasoning_rate, missing_reasoning_rate, truncated_reasoning_rate, empty_reasoning_rate, answer_rate
+
+# training (core — prevents reasoning collapse)
+thinkpack.apply_mask(conversations, tokenizer, masked=thinkpack.MaskType.THINK)  # -> Dataset
+thinkpack.MaskType                      # IntFlag: PROMPT | THINK | RESPONSE
+
+# distillation utilities
+thinkpack.build_prompts(records)                         # -> list[str]
+thinkpack.extract_distilled_reasoning(text)              # -> str | None | list[str | None]
+thinkpack.to_conversations(records)                      # -> list[list[dict]]
+thinkpack.update_records(records, responses)             # -> list[dict]
 ```
 
 ## Docs
 
-- [mask.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/mask.py): loss masking — `Mask` flag, `mask()` function, template-aware tokenization
-- [parse.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/parse.py): response parsing — `ParsedResponse`, `parse()`, `parse_all()`, `parse_output()`
-- [stats.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/stats.py): statistics — `ResponseStats`, `stats()`
-- [steer.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/steer.py): inference steering — `SimplePrefix`, `steer()`, `apply_steer_template()`
-- [_model.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/_model.py): model detection — `TemplateStyle`, `ModelInfo`, `detect_model()`
+- [mask.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/mask.py): loss masking — `MaskType` flag, `apply_mask()` function, template-aware tokenization
+- [parse.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/parse.py): response parsing — `ParsedResponse`, `parse()`
+- [stats.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/stats.py): statistics — `ResponseStats`, `compute_stats()`
+- [model.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/model.py): model detection — `TagStyle`, `ModelInfo`, `detect_model()`, `get_model_info()`
+- [chat.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/chat.py): chat templates — `apply_chat_template()`, `apply_chat_templates()`
+- [distill.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/distill.py): distillation — `build_prompts()`, `extract_distilled_reasoning()`, `to_conversations()`, `update_records()`
 
 ## Examples
 
-- [examples/training.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/examples/training.py): naive SFT vs masking-based SFT — the core experimental comparison
-- [examples/inference.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/examples/inference.py): measuring reasoning collapse with parse + stats (AR and VR rates)
+- [examples/scripts/training.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/examples/scripts/training.py): naive SFT vs masking-based SFT — the core experimental comparison
+- [examples/scripts/inference.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/examples/scripts/inference.py): measuring reasoning collapse with parse + compute_stats (AR and VR rates)
 
 ## Optional
 
-- [tests/test_mask.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/tests/test_mask.py): mask tests across INLINE, NATIVE, and PREFIXED template styles
+- [tests/test_mask.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/tests/test_mask.py): mask tests across HTML and BRACKET tag styles, and prefixed vs non-prefixed templates
 - [tests/test_parse.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/tests/test_parse.py): parsing tests covering all four response formats
 - [tests/test_stats.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/tests/test_stats.py): stats aggregation tests
-- [tests/test_steer.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/tests/test_steer.py): steering injection tests across template styles
 - [pyproject.toml](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/pyproject.toml): package metadata and dependencies
 - [README.md](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/README.md): narrative documentation with per-module code examples
