@@ -183,6 +183,26 @@ def apply_chat_template(
     )
 
 
+def _resolve_prefix(
+    prefix: str | list[str] | None,
+    n: int,
+    name: str,
+) -> list[str | None]:
+    """Expand a prefix argument into a per-conversation list of length n.
+
+    A plain string is broadcast to all n conversations; a list is validated
+    and returned as-is; None becomes a list of None values.
+    """
+    if isinstance(prefix, list):
+        if len(prefix) != n:
+            raise ValueError(
+                f"{name} list length ({len(prefix)}) "
+                f"must match conversations length ({n})"
+            )
+        return list(prefix)
+    return [prefix] * n
+
+
 def apply_chat_templates(
     conversations: list[list[dict[str, str]]],
     tokenizer: _Tokenizer,
@@ -203,28 +223,16 @@ def apply_chat_templates(
     Returns a list of prompt strings, one per conversation.
     """
     n = len(conversations)
-
-    # resolve per-conversation think prefixes
-    if isinstance(think_prefix, list):
-        if len(think_prefix) != n:
-            raise ValueError(
-                f"think_prefix list length ({len(think_prefix)}) "
-                f"must match conversations length ({n})"
-            )
-        think_prefixes: list[str | None] = list(think_prefix)
-    else:
-        think_prefixes = [think_prefix] * n
-
-    # resolve per-conversation response prefixes
-    if isinstance(response_prefix, list):
-        if len(response_prefix) != n:
-            raise ValueError(
-                f"response_prefix list length ({len(response_prefix)}) "
-                f"must match conversations length ({n})"
-            )
-        response_prefixes: list[str | None] = list(response_prefix)
-    else:
-        response_prefixes = [response_prefix] * n
+    think_prefixes = _resolve_prefix(
+        prefix=think_prefix,
+        n=n,
+        name="think_prefix",
+    )
+    response_prefixes = _resolve_prefix(
+        prefix=response_prefix,
+        n=n,
+        name="response_prefix",
+    )
 
     return [
         apply_chat_template(

@@ -60,6 +60,11 @@ class ResponseStats:
         return self.valid_reasoning_rate
 
     @property
+    def ir(self) -> float:
+        """Short for invalid_reasoning_rate."""
+        return self.invalid_reasoning_rate
+
+    @property
     def mr(self) -> float:
         """Short for missing_reasoning_rate."""
         return self.missing_reasoning_rate
@@ -73,6 +78,11 @@ class ResponseStats:
     def er(self) -> float:
         """Short for empty_reasoning_rate."""
         return self.empty_reasoning_rate
+
+    @property
+    def ar(self) -> float:
+        """Short for answer_rate."""
+        return self.answer_rate
 
 
 def _aggregate(task_stats: list[ResponseStats]) -> ResponseStats:
@@ -185,7 +195,7 @@ def compute_stats(
         missing_reasoning_rate=_rate([r.has_missing_reasoning for r in flat]),
         truncated_reasoning_rate=_rate([r.has_truncated_reasoning for r in flat]),
         empty_reasoning_rate=_rate([r.has_empty_reasoning for r in flat]),
-        answer_rate=_rate([r.extracted_answer for r in flat]),
+        answer_rate=_rate([r.has_answer for r in flat]),
         avg_reasoning_tokens=avg_reasoning_tokens,
         avg_answer_tokens=avg_answer_tokens,
         pass_at_1=pass_at_1,

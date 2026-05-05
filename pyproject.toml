@@ -13,7 +13,6 @@ where = ["src"]
 
 [project]
 name = "thinkpack"
-# version = "0.0.0"
 dynamic = ["version"]
 description = "A framework for training, parsing, and evaluating explicit reasoning models — focused on reasoning collapse."
 readme = "README.md"

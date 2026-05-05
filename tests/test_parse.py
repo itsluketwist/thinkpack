@@ -108,13 +108,13 @@ class TestParse:
         """valid_answer is True when the answer contains non-whitespace text."""
         result = parse(response="<think>\nr\n</think>\nthe answer", model_info=_THINK)
 
-        assert result.extracted_answer is True
+        assert result.has_answer is True
 
     def test_valid_answer_false_on_empty(self) -> None:
         """valid_answer is False when the answer is empty (e.g. truncated response)."""
         result = parse(response="<think>\nstarted...", model_info=_THINK)
 
-        assert result.extracted_answer is False
+        assert result.has_answer is False
 
 
 class TestParseCustomTag:
@@ -295,7 +295,7 @@ class TestQwen3Parse:
         assert result.reasoning == "some reasoning"
         assert result.answer == "the answer"
         assert result.reasoning_tag == "think"
-        assert result.extracted_answer is True
+        assert result.has_answer is True
 
     def test_tagless_is_plain_answer(self, qwen3_tokenizer) -> None:
         """Non-prefixed tokenizer: response without tags is a plain answer."""
@@ -306,7 +306,7 @@ class TestQwen3Parse:
 
         assert result.has_missing_reasoning is True
         assert result.answer == "just an answer"
-        assert result.extracted_answer is True
+        assert result.has_answer is True
 
     def test_token_counts_populated(self, qwen3_tokenizer) -> None:
         """Token counts are set when calculate_tokens=True."""
@@ -374,7 +374,7 @@ class TestOlmo3Parse:
 
         assert result.has_valid_reasoning is True
         assert result.answer == "the answer"
-        assert result.extracted_answer is True
+        assert result.has_answer is True
 
     def test_tagless_is_truncated(self, olmo3_tokenizer) -> None:
         """Prefixed tokenizer: response without any tags is treated as truncated."""
@@ -394,7 +394,7 @@ class TestOlmo3Parse:
             tokenizer=olmo3_tokenizer,
         )
 
-        assert result.extracted_answer is False
+        assert result.has_answer is False
 
     def test_model_info_param(self, olmo3_tokenizer) -> None:
         """Passing model_info directly gives the same result as passing a tokenizer."""
@@ -432,7 +432,7 @@ class TestMinistralParse:
         assert result.reasoning == "some reasoning"
         assert result.answer == "the answer"
         assert result.reasoning_tag == "THINK"
-        assert result.extracted_answer is True
+        assert result.has_answer is True
 
     def test_tagless_is_plain_answer(self, ministral_tokenizer) -> None:
         """Non-prefixed tokenizer: response without tags is a plain answer."""

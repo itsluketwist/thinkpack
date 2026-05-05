@@ -49,7 +49,7 @@ class ParsedResponse:
         return not self.has_valid_reasoning
 
     @property
-    def extracted_answer(self) -> bool:
+    def has_answer(self) -> bool:
         """True if the answer is non-empty and non-whitespace."""
         return bool(self.answer.strip())
 

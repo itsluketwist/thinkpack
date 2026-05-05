@@ -85,7 +85,8 @@ def write(
     Returns the path the file was written to.
     """
     content, path = generate(tool=tool, directory=directory)
-    assert path is not None  # path is always set when tool is provided
+    if path is None:
+        raise RuntimeError("generate() returned no path for a non-None tool")
 
     # ensure the destination directory exists before writing
     path.parent.mkdir(parents=True, exist_ok=True)

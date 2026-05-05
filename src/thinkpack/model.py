@@ -54,17 +54,9 @@ class TagStyle(StrEnum):
 class ModelInfo:
     """Detected template properties for a model's reasoning block handling.
 
-    Detected once via detect_model() and used internally by mask() and chat()
-    to handle model-specific formatting without exposing flags to the user.
-    prefixed indicates whether the template injects the opening reasoning tag
-    into the generation prompt (True) or leaves it for the model to generate
-    (False). strips_think_tags indicates whether the template removes think
-    tags from assistant message content when rendering (e.g. DeepSeek R1).
-    tag_content is the name inside the reasoning tag (e.g. "think"), and
-    tag_style determines how it is wrapped (HTML or BRACKET). open_tag and
-    close_tag are derived automatically. reasoning_key is reserved for future
-    use and is always None from automatic detection. Use with_tag() to produce
-    a copy with an overridden tag.
+    Produced by detect_model() and consumed by chat() and mask() to handle
+    model-specific formatting. Use with_tag() to produce a copy with an
+    overridden tag without re-running detection.
     """
 
     # true if the template injects the opening reasoning tag into the generation prompt
@@ -166,23 +158,11 @@ def detect_model(tokenizer: _Tokenizer) -> ModelInfo:
     """
     Detect how a tokenizer handles reasoning blocks from its chat template.
 
-    Step 1: determines whether the template is prefixed. Renders a minimal user
-    message with add_generation_prompt=True and checks for a trailing opening tag
-    (html or bracket-style). A trailing tag means the template injects it at
-    generation time (prefixed=True); otherwise the model generates the tag itself
-    (prefixed=False).
+    Inspects the template in three steps (see inline comments): prefixed detection,
+    tag name detection, and strips_think_tags detection. Results are cached on the
+    template string so repeated calls are free.
 
-    Step 2: detects the reasoning tag by searching the template source string for
-    known tag patterns. The first match in _KNOWN_TAGS wins; defaults to <think>
-    if none are found. The tag override argument on get_model_info() can always be
-    used to correct or override the detected tag.
-
-    Step 3: detects whether the template strips think tags from assistant content
-    by rendering a test assistant message with think tags embedded and checking if
-    they survive in the output (strips_think_tags=True if they do not).
-
-    Returns a ModelInfo with the detected properties. reasoning_key is always None
-    — native reasoning field detection is not currently implemented.
+    Returns a ModelInfo with the detected properties.
     """
     template = tokenizer.chat_template or ""
     if cached := _cache.get(template):

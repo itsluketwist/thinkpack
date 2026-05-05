@@ -9,7 +9,7 @@ from typing import overload
 _DEFAULT_PREAMBLE = (
     "I need assistance constructing a reasoning dataset.\n"
     "Given the following question and its correct answer, "
-    "give a concise summary of the reasoning reasoning steps that "
+    "give a concise summary of the reasoning steps that "
     "explains how to arrive at the answer."
 )
 
@@ -49,7 +49,7 @@ def build_prompts(
             f"{preamble}\n\n"
             f"Question: {instruction}\n\n"
             f"Answer: {response}\n\n"
-            f"In your respone, give the reasoning steps inside <{distill_tag}> tags."
+            f"In your response, give the reasoning steps inside <{distill_tag}> tags."
             f"{example_block}"
         )
         prompts.append(prompt)
@@ -123,9 +123,9 @@ def update_records(
     Add extracted reasoning traces into a list of records.
 
     Calls extract_distilled_reasoning on each response and writes the result into the
-    corresponding record under reasoning_field. Only adds the reasoning_field where extraction succeeded;
-    records where extraction returns None are returned unchanged. Original records are
-    not mutated.
+    corresponding record under reasoning_field. Only adds the field where extraction
+    succeeded; records where extraction returns None are returned unchanged. Original
+    records are not mutated.
 
     Returns a new list of record dicts with the reasoning_field added where available.
     """
