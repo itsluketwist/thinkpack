@@ -1,12 +1,13 @@
-# `ThinkPack`
+# ***`ThinkPack`***
 
 [![lint](https://github.com/itsluketwist/thinkpack/actions/workflows/lint.yaml/badge.svg)](https://github.com/itsluketwist/thinkpack/actions/workflows/lint.yaml)
 [![test](https://github.com/itsluketwist/thinkpack/actions/workflows/test.yaml/badge.svg)](https://github.com/itsluketwist/thinkpack/actions/workflows/test.yaml)
 [![release](https://github.com/itsluketwist/thinkpack/actions/workflows/release.yaml/badge.svg)](https://github.com/itsluketwist/thinkpack/actions/workflows/release.yaml)
 
-A framework for training, parsing, and evaluating explicit reasoning models — centred on **reasoning collapse**.
+A lightweight framework for reasoning-aware training, parsing, and evaluation of explicit reasoning language models.
+Focussed on the characterisation and mitigation of **reasoning collapse**.
 
-`thinkpack` provides four focused modules:
+***`thinkpack`*** provides four focused modules:
 
 - 💬 **[Chat templating](#thinkpackchat--chat-templating)** (`thinkpack.chat`) — applies chat templates with optional thought-steering and reasoning history embedding.
 - 🔍 **[Response parsing](#thinkpackparse--response-parsing)** (`thinkpack.parse`) — splits raw model output into reasoning and answer components, with flags for presence, validity, and truncation.
