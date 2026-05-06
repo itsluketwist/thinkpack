@@ -5,31 +5,38 @@
 [![release](https://github.com/itsluketwist/thinkpack/actions/workflows/release.yaml/badge.svg)](https://github.com/itsluketwist/thinkpack/actions/workflows/release.yaml)
 
 A lightweight framework for reasoning-aware training, parsing, and evaluation of explicit reasoning language models.
-Focussed on the characterisation and mitigation of **reasoning collapse**.
+Focussed on the characterisation and mitigation of **reasoning-trace collapse**.
 
-***`thinkpack`*** provides four focused modules:
+***`ThinkPack`*** provides four focused modules:
 
 - 💬 **[Chat templating](#thinkpackchat--chat-templating)** (`thinkpack.chat`) — applies chat templates with optional thought-steering and reasoning history embedding.
 - 🔍 **[Response parsing](#thinkpackparse--response-parsing)** (`thinkpack.parse`) — splits raw model output into reasoning and answer components, with flags for presence, validity, and truncation.
-- 📊 **[Statistics](#thinkpackstats--response-statistics)** (`thinkpack.stats`) — aggregates parsed responses into AR and VR rates, making reasoning collapse measurable.
-- 🎭 **[Loss masking](#thinkpackmask--training-time-loss-masking)** (`thinkpack.mask`) — the core method; prevents reasoning collapse during fine-tuning by masking think blocks from the loss.
+- 📊 **[Statistics](#thinkpackstats--response-statistics)** (`thinkpack.stats`) — aggregates parsed responses into VR, ER, TR, MR, and Rpass@1, making reasoning-trace collapse measurable.
+- 🎭 **[Loss masking](#thinkpackmask--training-time-loss-masking)** (`thinkpack.mask`) — the core method; prevents reasoning-trace collapse during fine-tuning by masking think blocks from the loss.
 
 ---
 
-## *reasoning collapse*
+## *reasoning-trace collapse*
 
-**Reasoning collapse** is a failure mode that occurs when fine-tuning reasoning-enabled models on standard instruction–response data:
+**Reasoning collapse** is the progressive loss of a model's ability to produce valid reasoning traces during fine-tuning. A model may still answer correctly, but stop producing a complete reasoning trace:
 
-> The model learns to skip its reasoning block entirely — producing answers directly without a `<think>` trace.
-
-This happens because the response alone is sufficient to minimise cross-entropy loss. The reasoning block provides no training signal and becomes an obstacle the model learns to avoid.
-
-```
-before fine-tuning:   x → <think>reasoning</think> answer
-after naive SFT:      x → answer
+```text
+before fine-tuning:  x → <think> reasoning </think> answer
+after naive SFT:     x → <think> </think> answer
+or simply:           x → answer
 ```
 
-ThinkPack makes this phenomenon **observable**, **measurable**, and **preventable**.
+This can happen when a reasoning model is adapted with ordinary instruction–response data that contains final answers, but no explicit reasoning traces.
+Standard supervised fine-tuning then gives the model a clear signal to produce the answer, but no signal to preserve the reasoning structure it learned during post-training.
+
+`ThinkPack` helps make this behaviour visible by parsing outputs into reasoning and answer segments, then tracking whether reasoning is:
+
+- valid: complete, non-empty, and extractable
+- empty: delimiters are present, but contain no reasoning
+- truncated: reasoning starts, but does not close
+- missing: no reasoning trace can be extracted
+
+It also supports reasoning-aware loss masking, so you can fine-tune on non-reasoning data without directly rewarding the model for producing empty or missing reasoning.
 
 ---
 
@@ -90,7 +97,7 @@ See [examples/notebooks/apply_chat.ipynb](examples/notebooks/apply_chat.ipynb) f
 
 ### `thinkpack.parse` — Response parsing
 
-Parse raw model outputs into structured components. Each `ParsedResponse` carries flags that directly support reasoning collapse analysis.
+Parse raw model outputs into structured components. Each `ParsedResponse` carries flags that directly support reasoning-trace collapse analysis.
 
 ```python
 # single response
@@ -117,44 +124,43 @@ Handles all four output formats:
 
 Recognises tag variants: `think`, `thinking`, `reasoning`, `thought` (case-insensitive).
 
+See [examples/notebooks/parse_and_stats.ipynb](examples/notebooks/parse_and_stats.ipynb) for interactive examples.
+
 ---
 
 ### `thinkpack.stats` — Response statistics
 
-Aggregates a batch of parsed responses into counts, exposing the **AR** and **VR** rates used to measure reasoning collapse.
+Aggregates a batch of parsed responses into counts, exposing the structural metrics used to measure reasoning-trace collapse.
 
 ```python
 parsed_list = thinkpack.parse(response=responses, tokenizer=tokenizer)
 s = thinkpack.compute_stats(responses=parsed_list)
 
-# reasoning collapse metrics — all rates in [0, 1]
+# reasoning-trace collapse metrics — all rates in [0, 1]
 s.valid_reasoning_rate     # float — VR: fraction with complete, non-blank reasoning
-s.missing_reasoning_rate   # float — fraction with no reasoning block at all
+s.missing_reasoning_rate   # float — MR: fraction with no reasoning block at all
 s.total                    # int — total responses
 
-# AR: fraction with any reasoning structure (valid + truncated + empty)
-ar = 1 - s.missing_reasoning_rate
-
 # additional breakdown
-s.truncated_reasoning_rate  # float — block opened but never closed
-s.empty_reasoning_rate      # float — block opened and closed, but blank
+s.truncated_reasoning_rate  # float — TR: block opened but never closed
+s.empty_reasoning_rate      # float — ER: block opened and closed, but blank
 s.answer_rate               # float — fraction with a non-blank answer
 ```
 
-`valid_reasoning_rate` and `invalid_reasoning_rate` sum to 1. The three invalid sub-types (`missing`, `truncated`, `empty`) sum to `invalid_reasoning_rate`.
+`valid_reasoning_rate` and the three invalid sub-types (`ER`, `TR`, `MR`) sum to 1.
 
 **Key metrics for the paper:**
 
 | Metric | Definition | Interpretation |
 |---|---|---|
-| **AR** | `1 - missing_reasoning_rate` | Fraction with any reasoning structure present |
-| **VR** | `valid_reasoning_rate` | Fraction with structurally valid reasoning |
+| **VR** | `valid_reasoning_rate` | Fraction with structurally valid reasoning (primary structural metric) |
+| **ER** | `empty_reasoning_rate` | Fraction with an empty reasoning block (delimiters present, no content) |
+| **TR** | `truncated_reasoning_rate` | Fraction where reasoning starts but is never closed |
+| **MR** | `missing_reasoning_rate` | Fraction with no reasoning block at all |
 | **pass@1** | accuracy on first sample | Standard answer correctness |
 | **Rpass@1** | accuracy among VR=True samples | Accuracy conditioned on valid reasoning |
 
 Reasoning collapse is observable as VR → 0 over training steps or data size.
-
-See [examples/scripts/inference.py](examples/scripts/inference.py) for a complete collapse measurement pipeline.
 
 ---
 
@@ -165,14 +171,14 @@ The core method. When fine-tuning a reasoning model, `apply_mask()` formats trai
 ```python
 import thinkpack
 
-# masking-based SFT — prevents reasoning collapse
+# masking-based SFT — prevents reasoning-trace collapse
 dataset = thinkpack.apply_mask(
     conversations=conversations,  # list of conversation dicts with "role" and "content" keys
     tokenizer=tokenizer,
     masked=thinkpack.MaskType.THINK,  # mask the think block from the loss
 )
 
-# naive SFT — causes reasoning collapse (use as baseline)
+# naive SFT — causes reasoning-trace collapse (use as baseline)
 naive_dataset = thinkpack.apply_mask(
     conversations=conversations,
     tokenizer=tokenizer,
@@ -188,9 +194,7 @@ The `masked` parameter is a composable flag — combine sections with `|`:
 | `MaskType.PROMPT \| MaskType.THINK` | Train on response only |
 | `None` | No masking; all tokens contribute to the loss (naive baseline) |
 
-Model-specific template handling (Qwen3's native `reasoning_content` field, OLMo-3's auto-injected opening tag) is detected automatically from the tokenizer — no manual configuration needed.
-
-See [examples/scripts/training.py](examples/scripts/training.py) for a complete comparison of naive vs masking-based SFT.
+See [examples/notebooks/loss_masking.ipynb](examples/notebooks/loss_masking.ipynb) for interactive examples.
 
 ---
 

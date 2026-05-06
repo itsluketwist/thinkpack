@@ -1,4 +1,4 @@
-# Reasoning Collapse: Empirical Study Replication Package
+# ***Reasoning-Trace Collapse: Empirical Study Replication Package***
 
 This package reproduces the experiments from the research paper ***"Reasoning-Trace Collapse: Evaluating the Loss of Explicit Reasoning During Fine-Tuning"***.
 It contains the training and evaluation code needed to observe the reasoning collapse phenomenon - where models that reason by default (using `<think>...</think>` blocks) stop reasoning entirely after fine-tuning on standard instruction-response data - and to compare strategies that prevent it.
@@ -12,7 +12,7 @@ The ThinkPack library ([companion repository](../)) provides utilities to allow 
 
 ---
 
-## Setup
+## *setup*
 
 **Requirements:** Python 3.11+, CUDA, one or more NVIDIA GPUs with at least 80GB VRAM (for full-precision LoRA).
 
@@ -28,9 +28,9 @@ pip install -r requirements.txt
 
 ---
 
-## Data
+## *datasets*
 
-The `data/` directory contains:
+The `data/` directory contains all datasets used:
 
 | File | Keys | Description |
 |------|------|-------------|
@@ -41,7 +41,7 @@ The `data/` directory contains:
 
 ---
 
-## Configuration
+## *configuration*
 
 The `config/` directory contains the hyperparameters used in the experiments:
 
@@ -52,11 +52,11 @@ Both files can be edited directly to adjust hyperparameters, or new named profil
 
 ---
 
-## Training
+## *training*
 
 Fine-tune a model using `train.py`. The primary variables are the **model**, the **reasoning strategy**, and the **learning rate**.
 
-### Reasoning strategies
+### *reasoning strategies*
 
 The `--strategy` flag controls how the training data is prepared:
 
@@ -69,7 +69,7 @@ The `--strategy` flag controls how the training data is prepared:
 | `respond` | Inject an empty `<think></think>` block and mask both it and the instruction; training only on response tokens |
 
 
-### Example commands
+### *example commands*
 
 ```bash
 # baseline — model's default chat template behaviour (collapse expected)
@@ -87,7 +87,7 @@ python train.py --model Qwen/Qwen3-8B --strategy empty --lr 1e-5
 
 Training artefacts (the LoRA adapter) are saved to `output/<model>-<strategy>/adapter/` by default. Pass `--output` to override.
 
-### All arguments
+### *all arguments*
 
 | Argument | Default | Description |
 |----------|---------|-------------|
@@ -100,7 +100,7 @@ Training artefacts (the LoRA adapter) are saved to `output/<model>-<strategy>/ad
 
 ---
 
-## Evaluation
+## *evaluation*
 
 Evaluate a model using `evaluate.py`. Pass `--adapter` to load a fine-tuned LoRA adapter on top of the base model; omit it to evaluate the base model directly.
 
@@ -119,7 +119,7 @@ python evaluate.py --model Qwen/Qwen3-8B --adapter output/qwen3-8b-mask/adapter 
 python evaluate.py --model Qwen/Qwen3-8B --adapter output/qwen3-8b-mask/adapter --dataset chemistry --output results/mask_chemistry.json
 ```
 
-### Output fields
+### *output fields*
 
 | Field | Description |
 |-------|-------------|
@@ -130,7 +130,7 @@ python evaluate.py --model Qwen/Qwen3-8B --adapter output/qwen3-8b-mask/adapter 
 | `tr` | Truncated reasoning rate — `<think>` opened but never closed (hit max tokens) |
 | `er` | Empty reasoning rate — `<think></think>` present but blank |
 
-### All arguments
+### *all arguments*
 
 | Argument | Default | Description |
 |----------|---------|-------------|
@@ -142,15 +142,15 @@ python evaluate.py --model Qwen/Qwen3-8B --adapter output/qwen3-8b-mask/adapter 
 
 ---
 
-## Reproducing Paper Results
+## *paper results*
 
 The experiments consist of two parts: a learning rate sweep on the `default` strategy, and a strategy comparison at a fixed learning rate.
 
-### Learning rate sweep (default strategy)
+### *learning rate sweep (default strategy)*
 
 Three learning rates are tested to show how collapse severity scales with training intensity.
 
-**Qwen3-8B** (`Qwen/Qwen3-8B`):
+**`qwen3-8b`** (`Qwen/Qwen3-8B`):
 
 ```bash
 python train.py --model Qwen/Qwen3-8B --strategy default --lr 2e-5
@@ -158,7 +158,7 @@ python train.py --model Qwen/Qwen3-8B --strategy default --lr 1e-5
 python train.py --model Qwen/Qwen3-8B --strategy default --lr 5e-6
 ```
 
-**OLMo-3-7B-Think** (`allenai/OLMo-3-7B-Think`):
+**`olmo-3-7b`** (`allenai/OLMo-3-7B-Think`):
 
 ```bash
 python train.py --model allenai/OLMo-3-7B-Think --strategy default --lr 2e-5
@@ -166,11 +166,11 @@ python train.py --model allenai/OLMo-3-7B-Think --strategy default --lr 1e-5
 python train.py --model allenai/OLMo-3-7B-Think --strategy default --lr 5e-6
 ```
 
-### Strategy comparison (lr = 1e-5)
+### *strategy comparison (lr = 1e-5)*
 
 Four strategies are compared at a fixed learning rate to evaluate which approaches prevent collapse.
 
-**Qwen3-8B** (`Qwen/Qwen3-8B`):
+**`qwen3-8b`** (`Qwen/Qwen3-8B`):
 
 ```bash
 python train.py --model Qwen/Qwen3-8B --strategy bare    --lr 1e-5
@@ -179,7 +179,7 @@ python train.py --model Qwen/Qwen3-8B --strategy mask    --lr 1e-5
 python train.py --model Qwen/Qwen3-8B --strategy respond --lr 1e-5
 ```
 
-**OLMo-3-7B-Think** (`allenai/OLMo-3-7B-Think`):
+**`olmo-3-7b`** (`allenai/OLMo-3-7B-Think`):
 
 ```bash
 python train.py --model allenai/OLMo-3-7B-Think --strategy bare    --lr 1e-5
@@ -188,7 +188,7 @@ python train.py --model allenai/OLMo-3-7B-Think --strategy mask    --lr 1e-5
 python train.py --model allenai/OLMo-3-7B-Think --strategy respond --lr 1e-5
 ```
 
-### Evaluation
+### *evaluation*
 
 In both cases, each saved checkpoint should be evaluated against all three benchmarks.
 
