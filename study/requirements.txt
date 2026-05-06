@@ -1,0 +1,22 @@
+# core model training
+torch==2.5.1
+unsloth
+trl==0.11.4
+peft==0.18.1
+accelerate
+
+# inference
+vllm==0.7.3
+
+# model loading and data
+transformers==4.57.6    # must be <5.0.0 — transformers 5.x breaks vllm 0.7.3
+datasets==2.19.1
+tokenizers
+
+# thinkpack: reasoning-aware framework
+# local install: pip install -e /path/to/thinkpack
+thinkpack
+
+# utilities
+llm-codegen-research
+pyyaml

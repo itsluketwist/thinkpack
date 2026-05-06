@@ -1,0 +1,26 @@
+# training config
+
+default:
+  num_epochs: 3
+  batch_size: 2                    # per-device batch size (limited by GPU memory)
+  gradient_accumulation_steps: 2   # effective batch size = batch_size * this
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  max_seq_length: 32768            # maximum for models in the study
+  logging_steps: 10
+  save_strategy: "no"              # adapter saved explicitly during training, no checkpoints
+  bf16: true
+  load_in_4bit: false
+
+  lora:
+    r: 16
+    alpha: 16                      # unsloth recommends alpha = r
+    dropout: 0                     # unsloth recommends 0 for speed
+    target_modules:                # expanded set for better quality
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj

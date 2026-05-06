@@ -1,0 +1,12 @@
+# inference config
+
+greedy:
+  # generation parameters
+  seed: 42
+  temperature: 0.0
+  top_p: 1.0
+  top_k: -1 # disabled for greedy
+  max_tokens: 32768
+  min_tokens: 32
+  samples: 1
+  chunk_size: 256
