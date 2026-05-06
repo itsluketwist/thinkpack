@@ -276,6 +276,352 @@ class TestParseEmptyReasoning:
 
 
 # ---------------------------------------------------------------------------
+# derived properties: has_invalid_reasoning, has_answer
+# ---------------------------------------------------------------------------
+
+
+class TestParsedResponseProperties:
+    """Tests for derived properties has_invalid_reasoning and has_answer."""
+
+    def test_has_invalid_reasoning_when_truncated(self) -> None:
+        """has_invalid_reasoning is True when the reasoning block was cut off."""
+        result = parse(response="<think>\nreasoning started...", model_info=_THINK)
+
+        assert result.has_invalid_reasoning is True
+
+    def test_has_invalid_reasoning_when_empty(self) -> None:
+        """has_invalid_reasoning is True when the reasoning block was present but blank."""
+        result = parse(response="<think>\n\n</think>\nthe answer", model_info=_THINK)
+
+        assert result.has_invalid_reasoning is True
+
+    def test_has_invalid_reasoning_when_missing(self) -> None:
+        """has_invalid_reasoning is True when no reasoning block structure was found."""
+        result = parse(response="just an answer", model_info=_THINK)
+
+        assert result.has_invalid_reasoning is True
+
+    def test_has_answer_false_for_whitespace_only(self) -> None:
+        """has_answer is False when the answer text is all whitespace."""
+        result = parse(
+            response="<think>\nsome reasoning\n</think>\n   \n",
+            model_info=_THINK,
+        )
+
+        # reasoning was valid but nothing useful follows the close tag
+        assert result.has_valid_reasoning is True
+        assert result.has_answer is False
+
+    def test_has_answer_false_when_close_tag_is_last(self) -> None:
+        """has_answer is False when the close tag ends the response with no trailing text."""
+        result = parse(
+            response="<think>\nsome reasoning\n</think>",
+            model_info=_THINK,
+        )
+
+        assert result.has_valid_reasoning is True
+        assert result.has_answer is False
+
+    def test_reasoning_tag_set_even_when_truncated(self) -> None:
+        """reasoning_tag is the tag name even for a truncated block (not None)."""
+        result = parse(response="<think>\nstarted...", model_info=_THINK)
+
+        # only the missing-reasoning case sets reasoning_tag to None
+        assert result.reasoning_tag == "think"
+
+    def test_reasoning_tag_none_only_when_missing(self) -> None:
+        """reasoning_tag is None only for the has_missing_reasoning case."""
+        results = [
+            parse(
+                response="<think>\nreasoning\n</think>\nans", model_info=_THINK
+            ),  # valid
+            parse(response="<think>\ntruncated...", model_info=_THINK),  # truncated
+            parse(response="<think>\n\n</think>\nans", model_info=_THINK),  # empty
+        ]
+        for r in results:
+            assert r.reasoning_tag is not None
+
+        missing = parse(response="just an answer", model_info=_THINK)
+        assert missing.reasoning_tag is None
+
+
+# ---------------------------------------------------------------------------
+# edge cases: empty inputs, whitespace, case, multiple tags
+# ---------------------------------------------------------------------------
+
+
+class TestParseEdgeCases:
+    """Tests for boundary input values and unusual response structures."""
+
+    def test_empty_string_non_prefixed(self) -> None:
+        """An empty string from a non-prefixed model is treated as a plain answer."""
+        result = parse(response="", model_info=_THINK)
+
+        assert result.has_missing_reasoning is True
+        assert result.answer == ""
+        assert result.has_answer is False
+
+    def test_empty_string_prefixed(self) -> None:
+        """An empty string from a prefixed model is treated as truncated reasoning.
+
+        Prefixed models inject the open tag via the chat template, so any response
+        without a close tag — including an empty one — is considered truncated.
+        """
+        result = parse(response="", model_info=_THINK_PREFIXED)
+
+        assert result.has_truncated_reasoning is True
+        assert result.answer == ""
+
+    def test_case_insensitive_html_open_and_close(self) -> None:
+        """HTML open and close tags are matched case-insensitively."""
+        response = "<THINK>\nsome reasoning\n</THINK>\nthe answer"
+        result = parse(response=response, model_info=_THINK)
+
+        assert result.has_valid_reasoning is True
+        assert result.reasoning == "some reasoning"
+        assert result.answer == "the answer"
+        # reasoning_tag always reflects model_info.tag_content, not the casing in the response
+        assert result.reasoning_tag == "think"
+
+    def test_only_open_tag_is_truncated(self) -> None:
+        """A response containing only the open tag is treated as a truncated block."""
+        result = parse(response="<think>", model_info=_THINK)
+
+        assert result.has_truncated_reasoning is True
+        assert result.answer == ""
+
+    def test_only_close_tag_is_empty_reasoning(self) -> None:
+        """A response containing only the close tag gives an empty reasoning block.
+
+        The close tag is found; nothing precedes it, so reasoning is blank.
+        """
+        result = parse(response="</think>", model_info=_THINK)
+
+        # close tag matched — block opened and closed but content is empty
+        assert result.has_empty_reasoning is True
+        assert result.has_valid_reasoning is False
+        assert result.answer == ""
+
+    def test_multiple_close_tags_first_one_terminates_reasoning(self) -> None:
+        """When multiple close tags appear, the first one terminates the reasoning block."""
+        response = "<think>\nreasoning\n</think>\npart1\n</think>\npart2"
+        result = parse(response=response, model_info=_THINK)
+
+        # search() finds the first close tag, so reasoning is clean
+        assert result.has_valid_reasoning is True
+        assert result.reasoning == "reasoning"
+        # everything after the first close tag becomes the answer, stray tag included
+        assert "part1" in result.answer
+
+    def test_close_tag_before_open_tag_gives_empty_reasoning(self) -> None:
+        """A stray close tag at the start (before any open tag) yields empty reasoning."""
+        response = "</think>\nsome answer"
+        result = parse(response=response, model_info=_THINK)
+
+        # close tag found at position 0 — before_close is empty → has_empty_reasoning
+        assert result.has_empty_reasoning is True
+        assert result.answer == "some answer"
+
+    def test_reasoning_stripped_of_surrounding_whitespace(self) -> None:
+        """Reasoning content is stripped of leading and trailing whitespace."""
+        response = "<think>\n\n   some reasoning   \n\n</think>\nthe answer"
+        result = parse(response=response, model_info=_THINK)
+
+        assert result.reasoning == "some reasoning"
+
+    def test_answer_stripped_of_surrounding_whitespace(self) -> None:
+        """Answer content is stripped of leading and trailing whitespace."""
+        response = "<think>\nreasoning\n</think>\n\n   the answer   \n"
+        result = parse(response=response, model_info=_THINK)
+
+        assert result.answer == "the answer"
+
+    def test_truncated_reasoning_preserves_raw_content(self) -> None:
+        """Truncated reasoning preserves the raw text after the open tag (not stripped).
+
+        Unlike the valid case, truncation captures everything after the open tag verbatim
+        so the full partial output is available for analysis.
+        """
+        response = "<think>\n  partial reasoning content"
+        result = parse(response=response, model_info=_THINK)
+
+        assert result.has_truncated_reasoning is True
+        # raw content after the open tag — leading newline/whitespace is preserved
+        assert "partial reasoning content" in result.reasoning
+
+    def test_reasoning_with_embedded_angle_brackets(self) -> None:
+        """Reasoning content containing HTML-like text (not a tag) is preserved."""
+        response = "<think>\ncompare x < y and a > b\n</think>\nthe answer"
+        result = parse(response=response, model_info=_THINK)
+
+        assert result.has_valid_reasoning is True
+        assert "x < y" in result.reasoning
+
+
+# ---------------------------------------------------------------------------
+# token counts: behaviour when no tokenizer is passed
+# ---------------------------------------------------------------------------
+
+
+class TestParseTokenCountsNoTokenizer:
+    """Tests for token count behaviour when model_info is used without a tokenizer."""
+
+    def test_counts_none_when_model_info_only_and_calculate_tokens_true(self) -> None:
+        """Token counts stay None when calculate_tokens=True but no tokenizer is given.
+
+        Token counting requires a tokenizer to call encode(); model_info alone is
+        not enough, so counts are silently left as None rather than raising an error.
+        """
+        result = parse(
+            response="<think>\nsome reasoning\n</think>\nthe answer",
+            model_info=_THINK,
+            calculate_tokens=True,
+        )
+
+        assert result.reasoning_token_count is None
+        assert result.answer_token_count is None
+
+    def test_counts_none_by_default_no_tokenizer(self) -> None:
+        """Token counts are None when calculate_tokens is not set (defaults to False)."""
+        result = parse(
+            response="<think>\nsome reasoning\n</think>\nthe answer",
+            model_info=_THINK,
+        )
+
+        assert result.reasoning_token_count is None
+        assert result.answer_token_count is None
+
+
+# ---------------------------------------------------------------------------
+# batch edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestParseBatchEdgeCases:
+    """Additional edge cases for batch (list) inputs to parse()."""
+
+    def test_single_element_flat_list(self) -> None:
+        """parse() with a single-element flat list returns a single-element list."""
+        result = parse(response=["<think>\nr\n</think>\na"], model_info=_THINK)
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0].has_valid_reasoning is True  # type: ignore[union-attr]
+
+    def test_single_element_nested_list(self) -> None:
+        """parse() with a single-element nested list returns a matching nested list."""
+        result = parse(response=[["<think>\nr\n</think>\na"]], model_info=_THINK)
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert len(result[0]) == 1  # type: ignore[arg-type]
+        assert result[0][0].has_valid_reasoning is True  # type: ignore[index]
+
+    def test_empty_nested_list(self) -> None:
+        """parse() with an empty nested list returns an empty nested list."""
+        result = parse(response=[[]], model_info=_THINK)
+
+        assert result == [[]]
+
+    def test_all_missing_reasoning_in_flat_list(self) -> None:
+        """A flat list of plain answers all resolve to has_missing_reasoning."""
+        responses = ["answer one", "answer two", "answer three"]
+        result = parse(response=responses, model_info=_THINK)
+
+        assert all(
+            r.has_missing_reasoning
+            for r in result  # type: ignore[union-attr]
+        )
+
+    def test_all_four_states_represented_in_flat_list(self) -> None:
+        """A flat list can contain all four reasoning states independently."""
+        responses = [
+            "<think>\nreasoning\n</think>\nanswer",  # valid
+            "<think>\ntruncated...",  # truncated
+            "<think>\n\n</think>\nanswer",  # empty
+            "plain answer",  # missing
+        ]
+        result = parse(response=responses, model_info=_THINK)
+
+        assert result[0].has_valid_reasoning is True  # type: ignore[index]
+        assert result[1].has_truncated_reasoning is True  # type: ignore[index]
+        assert result[2].has_empty_reasoning is True  # type: ignore[index]
+        assert result[3].has_missing_reasoning is True  # type: ignore[index]
+
+
+# ---------------------------------------------------------------------------
+# prefixed model edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestParsePrefixedEdgeCases:
+    """Additional edge cases for ModelInfo with prefixed=True."""
+
+    def test_close_tag_only_is_empty_reasoning(self) -> None:
+        """A prefixed model response beginning with the close tag gives empty reasoning.
+
+        The open tag is injected by the template; if nothing precedes the close tag in
+        the decoded output the reasoning block is blank.
+        """
+        result = parse(response="</think>\nthe answer", model_info=_THINK_PREFIXED)
+
+        assert result.has_empty_reasoning is True
+        assert result.answer == "the answer"
+
+    def test_whitespace_before_close_tag_is_empty_reasoning(self) -> None:
+        """Whitespace-only content before the close tag is treated as empty reasoning."""
+        result = parse(
+            response="   \n   </think>\nthe answer",
+            model_info=_THINK_PREFIXED,
+        )
+
+        assert result.has_empty_reasoning is True
+        assert result.answer == "the answer"
+
+    def test_prefixed_with_spurious_open_tag_still_parses(self) -> None:
+        """A prefixed model that re-emits the open tag is parsed correctly.
+
+        If the model echoes back <think> even though the template already injected it,
+        open_re.sub strips the extra tag and the block is extracted normally.
+        """
+        response = "<think>\nsome reasoning\n</think>\nthe answer"
+        result = parse(response=response, model_info=_THINK_PREFIXED)
+
+        assert result.has_valid_reasoning is True
+        assert result.reasoning == "some reasoning"
+        assert result.answer == "the answer"
+
+    def test_bracket_tag_prefixed_model_close_tag_only(self) -> None:
+        """A bracket-tag prefixed model parses close-tag-only output correctly."""
+        _bracket_prefixed = ModelInfo(
+            prefixed=True,
+            tag_content="THINK",
+            tag_style=TagStyle.BRACKET,
+        )
+        response = "some reasoning\n[/THINK]\nthe answer"
+        result = parse(response=response, model_info=_bracket_prefixed)
+
+        assert result.has_valid_reasoning is True
+        assert result.reasoning == "some reasoning"
+        assert result.answer == "the answer"
+
+    def test_bracket_tag_prefixed_model_no_close_tag_is_truncated(self) -> None:
+        """A bracket-tag prefixed model with no close tag is treated as truncated."""
+        _bracket_prefixed = ModelInfo(
+            prefixed=True,
+            tag_content="THINK",
+            tag_style=TagStyle.BRACKET,
+        )
+        result = parse(
+            response="reasoning that never ended",
+            model_info=_bracket_prefixed,
+        )
+
+        assert result.has_truncated_reasoning is True
+        assert result.answer == ""
+
+
+# ---------------------------------------------------------------------------
 # Qwen3 — non-prefixed, <think> tags
 # ---------------------------------------------------------------------------
 
