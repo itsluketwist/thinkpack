@@ -139,7 +139,7 @@ def apply_chat_template(
     response_prefix: str | None = None,
     override_tag: str | None = None,
     add_generation_reasoning: bool | None = None,
-    add_generation_prompt: bool = True,
+    add_generation_prompt: bool | None = None,
     **kwargs: object,
 ) -> str:
     """
@@ -161,7 +161,8 @@ def apply_chat_template(
 
     think_prefix seeds the model's reasoning inside the open block.
     response_prefix seeds the response after the block closes.
-    add_generation_prompt controls whether there is an assistant turn opener.
+    add_generation_prompt is forwarded directly to the tokenizer; when None (default)
+    the tokenizer's own default is used.
 
     Additional kwargs are forwarded to tokenizer.apply_chat_template(), allowing
     model-specific parameters to be passed through.
@@ -173,7 +174,7 @@ def apply_chat_template(
             "add_generation_reasoning=False cannot be combined with think_prefix — "
             "reasoning block absence contradicts injecting a thought prefix directly"
         )
-    if not add_generation_prompt and (
+    if add_generation_prompt is False and (
         think_prefix is not None
         or response_prefix is not None
         or add_generation_reasoning is True
@@ -192,10 +193,12 @@ def apply_chat_template(
         model_info=model_info,
     )
 
+    # only forward add_generation_prompt when explicitly set; None defers to the tokenizer
+    if add_generation_prompt is not None:
+        kwargs = {**kwargs, "add_generation_prompt": add_generation_prompt}
     templated: str | list[int] = tokenizer.apply_chat_template(
         prepared,
         tokenize=False,
-        add_generation_prompt=add_generation_prompt,
         **kwargs,
     )
     if isinstance(templated, list):
@@ -242,7 +245,7 @@ def apply_chat_templates(
     response_prefix: str | list[str] | None = None,
     override_tag: str | None = None,
     add_generation_reasoning: bool | None = None,
-    add_generation_prompt: bool = True,
+    add_generation_prompt: bool | None = None,
     **kwargs: object,
 ) -> list[str]:
     """

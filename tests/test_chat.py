@@ -59,6 +59,7 @@ class TestQwen3ChatTemplate:
         result = apply_chat_template(
             conversation=[{"role": "user", "content": "q"}],
             tokenizer=qwen3_tokenizer,
+            add_generation_prompt=True,
         )
 
         assert result == base
@@ -72,6 +73,7 @@ class TestQwen3ChatTemplate:
             conversation=[{"role": "user", "content": "q"}],
             tokenizer=qwen3_tokenizer,
             think_prefix="Okay, ",
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -85,6 +87,7 @@ class TestQwen3ChatTemplate:
             conversation=[{"role": "user", "content": "q"}],
             tokenizer=qwen3_tokenizer,
             add_generation_reasoning=False,
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -99,6 +102,7 @@ class TestQwen3ChatTemplate:
             tokenizer=qwen3_tokenizer,
             add_generation_reasoning=False,
             response_prefix="Answer:",
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -111,6 +115,7 @@ class TestQwen3ChatTemplate:
             conversation=[{"role": "user", "content": "q"}],
             tokenizer=qwen3_tokenizer,
             add_generation_reasoning=None,
+            add_generation_prompt=True,
         )
 
         assert result == base
@@ -141,6 +146,7 @@ class TestQwen3ChatTemplate:
                 {"role": "user", "content": "And 3+3?"},
             ],
             tokenizer=qwen3_tokenizer,
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -161,6 +167,7 @@ class TestQwen3ChatTemplate:
                 {"role": "user", "content": "And 3+3?"},
             ],
             tokenizer=qwen3_tokenizer,
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -177,6 +184,7 @@ class TestQwen3ChatTemplate:
         result = apply_chat_template(
             conversation=msgs,
             tokenizer=qwen3_tokenizer,
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -189,7 +197,11 @@ class TestQwen3ChatTemplate:
         ]
         expected = [_base(qwen3_tokenizer, c) for c in convs]
 
-        result = apply_chat_templates(conversations=convs, tokenizer=qwen3_tokenizer)
+        result = apply_chat_templates(
+            conversations=convs,
+            tokenizer=qwen3_tokenizer,
+            add_generation_prompt=True,
+        )
 
         assert result == expected
 
@@ -216,6 +228,7 @@ class TestOlmo3ChatTemplate:
         result = apply_chat_template(
             conversation=[{"role": "user", "content": "q"}],
             tokenizer=olmo3_tokenizer,
+            add_generation_prompt=True,
         )
 
         assert result == base
@@ -229,6 +242,7 @@ class TestOlmo3ChatTemplate:
             conversation=[{"role": "user", "content": "q"}],
             tokenizer=olmo3_tokenizer,
             think_prefix="Okay, ",
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -243,6 +257,7 @@ class TestOlmo3ChatTemplate:
             conversation=[{"role": "user", "content": "q"}],
             tokenizer=olmo3_tokenizer,
             add_generation_reasoning=False,
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -257,6 +272,7 @@ class TestOlmo3ChatTemplate:
             tokenizer=olmo3_tokenizer,
             add_generation_reasoning=False,
             response_prefix="Answer:",
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -269,6 +285,7 @@ class TestOlmo3ChatTemplate:
             conversation=[{"role": "user", "content": "q"}],
             tokenizer=olmo3_tokenizer,
             add_generation_reasoning=None,
+            add_generation_prompt=True,
         )
 
         assert result == base
@@ -283,6 +300,7 @@ class TestOlmo3ChatTemplate:
             tokenizer=olmo3_tokenizer,
             add_generation_reasoning=None,
             response_prefix="Answer:",
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -312,6 +330,7 @@ class TestOlmo3ChatTemplate:
                 {"role": "user", "content": "And 3+3?"},
             ],
             tokenizer=olmo3_tokenizer,
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -332,6 +351,7 @@ class TestOlmo3ChatTemplate:
                 {"role": "user", "content": "And 3+3?"},
             ],
             tokenizer=olmo3_tokenizer,
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -348,6 +368,7 @@ class TestOlmo3ChatTemplate:
         result = apply_chat_template(
             conversation=msgs,
             tokenizer=olmo3_tokenizer,
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -360,7 +381,11 @@ class TestOlmo3ChatTemplate:
         ]
         expected = [_base(olmo3_tokenizer, c) for c in convs]
 
-        result = apply_chat_templates(conversations=convs, tokenizer=olmo3_tokenizer)
+        result = apply_chat_templates(
+            conversations=convs,
+            tokenizer=olmo3_tokenizer,
+            add_generation_prompt=True,
+        )
 
         assert result == expected
 
@@ -384,6 +409,7 @@ class TestMinistralChatTemplate:
             conversation=[{"role": "user", "content": "q"}],
             tokenizer=ministral_tokenizer,
             override_tag="[THINK]",
+            add_generation_prompt=True,
         )
 
         assert result == base
@@ -398,6 +424,7 @@ class TestMinistralChatTemplate:
             tokenizer=ministral_tokenizer,
             override_tag="[THINK]",
             think_prefix="Okay, ",
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -412,6 +439,7 @@ class TestMinistralChatTemplate:
             tokenizer=ministral_tokenizer,
             override_tag="[THINK]",
             add_generation_reasoning=False,
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -427,6 +455,7 @@ class TestMinistralChatTemplate:
             override_tag="[THINK]",
             add_generation_reasoning=False,
             response_prefix="Answer:",
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -440,6 +469,7 @@ class TestMinistralChatTemplate:
             tokenizer=ministral_tokenizer,
             override_tag="[THINK]",
             add_generation_reasoning=None,
+            add_generation_prompt=True,
         )
 
         assert result == base
@@ -470,6 +500,7 @@ class TestMinistralChatTemplate:
             ],
             tokenizer=ministral_tokenizer,
             override_tag="[THINK]",
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -491,6 +522,7 @@ class TestMinistralChatTemplate:
             ],
             tokenizer=ministral_tokenizer,
             override_tag="[THINK]",
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -508,6 +540,7 @@ class TestMinistralChatTemplate:
             conversation=msgs,
             tokenizer=ministral_tokenizer,
             override_tag="[THINK]",
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -524,6 +557,7 @@ class TestMinistralChatTemplate:
             conversations=convs,
             tokenizer=ministral_tokenizer,
             override_tag="[THINK]",
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -555,6 +589,7 @@ class TestDeepSeekR1LlamaChatTemplate:
         result = apply_chat_template(
             conversation=[{"role": "user", "content": "q"}],
             tokenizer=deepseek_r1_llama_tokenizer,
+            add_generation_prompt=True,
         )
 
         assert result == base
@@ -568,6 +603,7 @@ class TestDeepSeekR1LlamaChatTemplate:
             conversation=[{"role": "user", "content": "q"}],
             tokenizer=deepseek_r1_llama_tokenizer,
             think_prefix="Okay, ",
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -582,6 +618,7 @@ class TestDeepSeekR1LlamaChatTemplate:
             conversation=[{"role": "user", "content": "q"}],
             tokenizer=deepseek_r1_llama_tokenizer,
             add_generation_reasoning=False,
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -598,6 +635,7 @@ class TestDeepSeekR1LlamaChatTemplate:
             tokenizer=deepseek_r1_llama_tokenizer,
             add_generation_reasoning=False,
             response_prefix="Answer:",
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -610,6 +648,7 @@ class TestDeepSeekR1LlamaChatTemplate:
             conversation=[{"role": "user", "content": "q"}],
             tokenizer=deepseek_r1_llama_tokenizer,
             add_generation_reasoning=None,
+            add_generation_prompt=True,
         )
 
         assert result == base
@@ -624,6 +663,7 @@ class TestDeepSeekR1LlamaChatTemplate:
             tokenizer=deepseek_r1_llama_tokenizer,
             add_generation_reasoning=None,
             response_prefix="Answer:",
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -659,6 +699,7 @@ class TestDeepSeekR1LlamaChatTemplate:
                 {"role": "user", "content": "And 3+3?"},
             ],
             tokenizer=deepseek_r1_llama_tokenizer,
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -683,6 +724,7 @@ class TestDeepSeekR1LlamaChatTemplate:
                 {"role": "user", "content": "And 3+3?"},
             ],
             tokenizer=deepseek_r1_llama_tokenizer,
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -699,6 +741,7 @@ class TestDeepSeekR1LlamaChatTemplate:
         result = apply_chat_template(
             conversation=msgs,
             tokenizer=deepseek_r1_llama_tokenizer,
+            add_generation_prompt=True,
         )
 
         assert result == expected
@@ -714,6 +757,7 @@ class TestDeepSeekR1LlamaChatTemplate:
         result = apply_chat_templates(
             conversations=convs,
             tokenizer=deepseek_r1_llama_tokenizer,
+            add_generation_prompt=True,
         )
 
         assert result == expected

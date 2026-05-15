@@ -20,7 +20,6 @@ class _Tokenizer(Protocol):
         self,
         conversation: list[dict[str, str]],
         tokenize: bool = ...,
-        add_generation_prompt: bool = ...,
         **kwargs: object,
     ) -> str | list[int]: ...
 
