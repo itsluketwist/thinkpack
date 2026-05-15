@@ -539,9 +539,11 @@ class TestDeepSeekR1LlamaChatTemplate:
     """apply_chat_template() tests for deepseek-ai/DeepSeek-R1-Distill-Llama-8B.
 
     Prefixed model (<think> tag is injected into the generation prompt by the
-    template). The template also strips <think>...</think> blocks from assistant
-    messages when rendering multi-turn history, so reasoning provided in history
-    turns is silently removed from the rendered output.
+    template). The template strips <think>...</think> blocks from assistant
+    messages when rendering multi-turn history. The library handles this via a
+    sentinel placeholder: template rendering uses the sentinel, then the full
+    think+content block is re-injected post-rendering, ensuring reasoning is
+    always preserved in the output when provided.
     """
 
     # --- single-turn generation prompt ---
@@ -629,15 +631,22 @@ class TestDeepSeekR1LlamaChatTemplate:
     # --- multi-turn history ---
 
     def test_multi_turn_with_reasoning(self, deepseek_r1_llama_tokenizer) -> None:
-        """Template strips the embedded <think>...</think> block from history; only content remains."""
-        # the template removes <think>...</think> blocks from assistant messages, so the
-        # expected output matches messages without any embedded reasoning
-        msgs = [
-            {"role": "user", "content": "What is 2+2?"},
-            {"role": "assistant", "content": "4"},
-            {"role": "user", "content": "And 3+3?"},
-        ]
-        expected = _base(deepseek_r1_llama_tokenizer, msgs)
+        """Reasoning is re-injected after template rendering, preserving it in the output."""
+        # the template strips think blocks from history, but our sentinel approach ensures
+        # the think+content block is re-injected; compute expected by rendering with a sentinel
+        # and replacing it with the full embedded block
+        sentinel = "ASSISTANT_CONTENT_SENTINEL"
+        raw = _base(
+            deepseek_r1_llama_tokenizer,
+            [
+                {"role": "user", "content": "What is 2+2?"},
+                {"role": "assistant", "content": sentinel},
+                {"role": "user", "content": "And 3+3?"},
+            ],
+        )
+        expected = raw.replace(
+            sentinel, _embed("4", "two plus two is four", "<think>", "</think>")
+        )
 
         result = apply_chat_template(
             conversation=[
@@ -655,14 +664,17 @@ class TestDeepSeekR1LlamaChatTemplate:
         assert result == expected
 
     def test_multi_turn_blank_reasoning(self, deepseek_r1_llama_tokenizer) -> None:
-        """Template strips the empty <think>\\n</think> block from history too."""
-        # same result as with reasoning — the template removes any think block regardless
-        msgs = [
-            {"role": "user", "content": "What is 2+2?"},
-            {"role": "assistant", "content": "4"},
-            {"role": "user", "content": "And 3+3?"},
-        ]
-        expected = _base(deepseek_r1_llama_tokenizer, msgs)
+        """Empty reasoning block is re-injected into history even for stripping models."""
+        sentinel = "ASSISTANT_CONTENT_SENTINEL"
+        raw = _base(
+            deepseek_r1_llama_tokenizer,
+            [
+                {"role": "user", "content": "What is 2+2?"},
+                {"role": "assistant", "content": sentinel},
+                {"role": "user", "content": "And 3+3?"},
+            ],
+        )
+        expected = raw.replace(sentinel, _embed_blank("4", "<think>", "</think>"))
 
         result = apply_chat_template(
             conversation=[

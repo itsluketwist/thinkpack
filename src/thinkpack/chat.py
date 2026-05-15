@@ -70,20 +70,34 @@ def _inject_prefixes(
     return _prompt
 
 
+# sentinel format used to mark think-injection points for strips_think_tags models;
+# template rendering is done with these placeholders, then replaced with the real blocks
+_THINK_SENTINEL = "___THINK_INJECT_{idx}___"
+
+
 def _prepare_messages(
     messages: list[dict[str, str]],
     model_info: ModelInfo,
-) -> list[dict[str, str]]:
+) -> tuple[list[dict[str, str]], dict[str, str]]:
     """
     Embed reasoning into assistant messages as literal tags prepended to content.
 
     The 'reasoning' key controls behaviour: if absent, the message passes through
     unchanged; if present and blank, an empty think block is prepended; if present
     and non-blank, a complete block wrapping the reasoning text is prepended.
-    This approach works uniformly for all models regardless of template style.
+
+    For models whose template strips think blocks from history (strips_think_tags=True),
+    reasoning is always preserved in the final output: a sentinel placeholder replaces the
+    assistant content during template rendering, and the think+content block is recorded
+    for post-processing substitution after the template runs.
+
+    Returns (prepared_messages, sentinel_map) where sentinel_map maps each sentinel string
+    to its think+content replacement. Empty when no sentinels are needed.
     """
     prepared = []
-    for m in messages:
+    sentinel_map: dict[str, str] = {}
+
+    for idx, m in enumerate(messages):
         if "reasoning" not in m:
             # no reasoning key — pass the message through as-is
             prepared.append(m)
@@ -91,17 +105,31 @@ def _prepare_messages(
 
         reasoning = m["reasoning"]
         base = {k: v for k, v in m.items() if k != "reasoning"}
+        content = base.get("content", "")
 
-        if reasoning:
-            # non-blank reasoning: wrap in open/close tags
-            tagged = f"{model_info.open_tag}\n{reasoning}\n{model_info.close_tag}\n"
+        if model_info.strips_think_tags:
+            # template would strip the think block, so use a sentinel instead;
+            # the real think+content is recorded and re-injected after rendering
+            sentinel = _THINK_SENTINEL.format(idx=idx)
+            if reasoning:
+                sentinel_map[sentinel] = (
+                    f"{model_info.open_tag}\n{reasoning}\n{model_info.close_tag}\n{content}"
+                )
+            else:
+                sentinel_map[sentinel] = (
+                    f"{model_info.open_tag}\n{model_info.close_tag}\n{content}"
+                )
+            prepared.append({**base, "content": sentinel})
         else:
-            # blank reasoning key: produce an empty think block
-            tagged = f"{model_info.open_tag}\n{model_info.close_tag}\n"
+            if reasoning:
+                # non-blank reasoning: wrap in open/close tags
+                tagged = f"{model_info.open_tag}\n{reasoning}\n{model_info.close_tag}\n"
+            else:
+                # blank reasoning key: produce an empty think block
+                tagged = f"{model_info.open_tag}\n{model_info.close_tag}\n"
+            prepared.append({**base, "content": tagged + content})
 
-        prepared.append({**base, "content": tagged + base.get("content", "")})
-
-    return prepared
+    return prepared, sentinel_map
 
 
 def apply_chat_template(
@@ -159,7 +187,7 @@ def apply_chat_template(
         tokenizer=tokenizer,
         override_tag=override_tag,
     )
-    prepared = _prepare_messages(
+    prepared, sentinel_map = _prepare_messages(
         messages=conversation,
         model_info=model_info,
     )
@@ -173,6 +201,10 @@ def apply_chat_template(
     if isinstance(templated, list):
         # some tokenizers return token ids despite tokenize=False
         templated = tokenizer.decode(templated)
+
+    # re-inject think blocks bypassed via sentinels (strips_think_tags models)
+    for sentinel, replacement in sentinel_map.items():
+        templated = templated.replace(sentinel, replacement)
 
     return _inject_prefixes(
         prompt=templated,
