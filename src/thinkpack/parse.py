@@ -140,6 +140,8 @@ def parse(
     override_tag: str | None = ...,
     model_info: ModelInfo | None = ...,
     calculate_tokens: bool = ...,
+    prompt: str | list[str] | None = ...,
+    add_generation_reasoning: bool | None = ...,
 ) -> ParsedResponse: ...
 
 
@@ -150,6 +152,8 @@ def parse(
     override_tag: str | None = ...,
     model_info: ModelInfo | None = ...,
     calculate_tokens: bool = ...,
+    prompt: str | list[str] | None = ...,
+    add_generation_reasoning: bool | None = ...,
 ) -> list[ParsedResponse]: ...
 
 
@@ -160,6 +164,8 @@ def parse(
     override_tag: str | None = ...,
     model_info: ModelInfo | None = ...,
     calculate_tokens: bool = ...,
+    prompt: str | list[str] | None = ...,
+    add_generation_reasoning: bool | None = ...,
 ) -> list[list[ParsedResponse]]: ...
 
 
@@ -169,6 +175,8 @@ def parse(
     override_tag: str | None = None,
     model_info: ModelInfo | None = None,
     calculate_tokens: bool = False,
+    prompt: str | list[str] | None = None,
+    add_generation_reasoning: bool | None = None,
 ) -> ParsedResponse | list[ParsedResponse] | list[list[ParsedResponse]]:
     """Parse one or more model responses into reasoning and answer components.
 
@@ -180,16 +188,36 @@ def parse(
     Pass model_info directly to skip detection (e.g. when reusing across a batch).
     At least one of tokenizer or model_info must be provided.
 
+    add_generation_reasoning mirrors apply_chat_template's parameter: True/False overrides
+    model_info.prefixed; None defers to prompt-based detection.
+
+    prompt is the generation prompt(s). When provided and add_generation_reasoning is None,
+    the first prompt is checked: if it ends with the open tag the model is treated as prefixed.
+
     Token counts are populated when calculate_tokens=True and a tokenizer is provided.
 
     Returns a ParsedResponse, list[ParsedResponse], or list[list[ParsedResponse]]
     matching the shape of the input.
     """
     if tokenizer is not None:
-        # detect model properties from the tokenizer; override_tag replaces the detected tag
         model_info = get_model_info(tokenizer=tokenizer, override_tag=override_tag)
     elif model_info is None:
         raise ValueError("One of tokenizer or model_info must be provided.")
+
+    # mirror apply_chat_template: True/False overrides detected prefixed state;
+    # None falls through to prompt-based detection
+    if add_generation_reasoning is True and not model_info.prefixed:
+        model_info = dataclasses.replace(model_info, prefixed=True)
+    elif add_generation_reasoning is False and model_info.prefixed:
+        model_info = dataclasses.replace(model_info, prefixed=False)
+    elif prompt is not None and not model_info.prefixed:
+        # check the first prompt as representative — all prompts in a batch use the
+        # same add_generation_reasoning setting
+        _sample: str | None = (
+            prompt if isinstance(prompt, str) else (prompt[0] if prompt else None)
+        )
+        if _sample and _sample.rstrip("\n").endswith(model_info.open_tag):
+            model_info = dataclasses.replace(model_info, prefixed=True)
 
     if isinstance(response, str):
         return _parse_single(

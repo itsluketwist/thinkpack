@@ -60,7 +60,7 @@ def qwen3_tokenizer():
 
 @pytest.fixture(scope="session")
 def qwen35_tokenizer():
-    """Qwen/Qwen3.5-0.8B — prefixed, <think> tags."""
+    """Qwen/Qwen3.5-9B — prefixed, <think> tags."""
     from transformers import AutoTokenizer
 
     return AutoTokenizer.from_pretrained(
@@ -71,7 +71,7 @@ def qwen35_tokenizer():
 
 @pytest.fixture(scope="session")
 def deepseek_r1_llama_tokenizer():
-    """deepseek-ai/DeepSeek-R1-Distill-Llama-8B — not prefixed, <think> tags."""
+    """deepseek-ai/DeepSeek-R1-Distill-Llama-8B — prefixed, <think> tags, strips history think blocks."""
     from transformers import AutoTokenizer
 
     return AutoTokenizer.from_pretrained(

@@ -622,6 +622,109 @@ class TestParsePrefixedEdgeCases:
 
 
 # ---------------------------------------------------------------------------
+# add_generation_reasoning and prompt — correcting parse() for injected open tags
+# ---------------------------------------------------------------------------
+
+
+class TestParsePrefixedOverride:
+    """Tests for add_generation_reasoning and prompt on parse().
+
+    add_generation_reasoning takes priority over prompt; prompt auto-detects from
+    the trailing open tag. Both fix truncation misclassification when the open tag
+    was injected into the prompt by apply_chat_template.
+    """
+
+    def test_add_generation_reasoning_true_truncated(self) -> None:
+        """True marks non-prefixed truncated output as has_truncated_reasoning."""
+        response = "reasoning that was cut off before the close tag"
+        result = parse(
+            response=response,
+            model_info=_THINK,
+            add_generation_reasoning=True,
+        )
+
+        assert result.has_truncated_reasoning is True
+        assert result.answer == ""
+        assert "cut off" in result.reasoning
+
+    def test_add_generation_reasoning_true_complete_unaffected(self) -> None:
+        """True does not change parsing when the close tag is present."""
+        response = "reasoning content\n</think>\nthe answer"
+        result_default = parse(response=response, model_info=_THINK)
+        result_flag = parse(
+            response=response,
+            model_info=_THINK,
+            add_generation_reasoning=True,
+        )
+
+        assert result_default.has_valid_reasoning is True
+        assert result_flag.has_valid_reasoning is True
+        assert result_default.reasoning == result_flag.reasoning
+        assert result_default.answer == result_flag.answer
+
+    def test_add_generation_reasoning_false_on_prefixed_model(self) -> None:
+        """False on a prefixed model treats tagless output as has_missing_reasoning."""
+        response = "just an answer"
+        result = parse(
+            response=response,
+            model_info=_THINK_PREFIXED,
+            add_generation_reasoning=False,
+        )
+
+        assert result.has_missing_reasoning is True
+        assert result.answer == response
+
+    def test_add_generation_reasoning_none_no_change(self) -> None:
+        """None (default) leaves detection unchanged."""
+        response = "reasoning that was cut off"
+        result = parse(
+            response=response, model_info=_THINK, add_generation_reasoning=None
+        )
+
+        assert result.has_missing_reasoning is True
+
+    def test_prompt_ending_with_tag_corrects_truncation(self) -> None:
+        """prompt ending with <think> auto-detects injected tag for non-prefixed model."""
+        response = "reasoning that was cut off"
+        result = parse(
+            response=response, model_info=_THINK, prompt="some prompt\n<think>"
+        )
+
+        assert result.has_truncated_reasoning is True
+        assert result.answer == ""
+
+    def test_prompt_not_ending_with_tag_no_change(self) -> None:
+        """prompt not ending with open tag leaves detection unchanged."""
+        result = parse(
+            response="just an answer",
+            model_info=_THINK,
+            prompt="some prompt without the tag",
+        )
+
+        assert result.has_missing_reasoning is True
+
+    def test_prompt_as_list_checks_first_entry(self) -> None:
+        """List prompt: first entry is the representative check."""
+        prompts = ["some prompt\n<think>", "another prompt\n<think>"]
+        result = parse(
+            response="truncated reasoning", model_info=_THINK, prompt=prompts
+        )
+
+        assert result.has_truncated_reasoning is True
+
+    def test_add_generation_reasoning_false_overrides_prompt(self) -> None:
+        """Explicit add_generation_reasoning takes priority over prompt auto-detection."""
+        result = parse(
+            response="just an answer",
+            model_info=_THINK_PREFIXED,
+            prompt="some prompt\n<think>",
+            add_generation_reasoning=False,
+        )
+
+        assert result.has_missing_reasoning is True
+
+
+# ---------------------------------------------------------------------------
 # Qwen3 — non-prefixed, <think> tags
 # ---------------------------------------------------------------------------
 

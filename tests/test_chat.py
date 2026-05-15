@@ -52,17 +52,16 @@ class TestQwen3ChatTemplate:
 
     # --- single-turn generation prompt ---
 
-    def test_default_adds_think_tag(self, qwen3_tokenizer) -> None:
-        """add_generation_reasoning=True (default): open tag appended after the prompt."""
+    def test_default_passthrough(self, qwen3_tokenizer) -> None:
+        """add_generation_reasoning=None (default): template output returned as-is, no tag added."""
         base = _base(qwen3_tokenizer, [{"role": "user", "content": "q"}])
-        expected = base.rstrip("\n") + "\n<think>\n"
 
         result = apply_chat_template(
             conversation=[{"role": "user", "content": "q"}],
             tokenizer=qwen3_tokenizer,
         )
 
-        assert result == expected
+        assert result == base
 
     def test_think_prefix_seeded(self, qwen3_tokenizer) -> None:
         """think_prefix is injected after the opening tag."""
@@ -129,7 +128,7 @@ class TestQwen3ChatTemplate:
             },
             {"role": "user", "content": "And 3+3?"},
         ]
-        expected = _base(qwen3_tokenizer, modified).rstrip("\n") + "\n<think>\n"
+        expected = _base(qwen3_tokenizer, modified)
 
         result = apply_chat_template(
             conversation=[
@@ -153,7 +152,7 @@ class TestQwen3ChatTemplate:
             {"role": "assistant", "content": _embed_blank("4", "<think>", "</think>")},
             {"role": "user", "content": "And 3+3?"},
         ]
-        expected = _base(qwen3_tokenizer, modified).rstrip("\n") + "\n<think>\n"
+        expected = _base(qwen3_tokenizer, modified)
 
         result = apply_chat_template(
             conversation=[
@@ -173,7 +172,7 @@ class TestQwen3ChatTemplate:
             {"role": "assistant", "content": "4"},
             {"role": "user", "content": "And 3+3?"},
         ]
-        expected = _base(qwen3_tokenizer, msgs).rstrip("\n") + "\n<think>\n"
+        expected = _base(qwen3_tokenizer, msgs)
 
         result = apply_chat_template(
             conversation=msgs,
@@ -188,9 +187,7 @@ class TestQwen3ChatTemplate:
             [{"role": "user", "content": "What is 1+1?"}],
             [{"role": "user", "content": "What is 2+2?"}],
         ]
-        expected = [
-            _base(qwen3_tokenizer, c).rstrip("\n") + "\n<think>\n" for c in convs
-        ]
+        expected = [_base(qwen3_tokenizer, c) for c in convs]
 
         result = apply_chat_templates(conversations=convs, tokenizer=qwen3_tokenizer)
 
@@ -212,17 +209,16 @@ class TestOlmo3ChatTemplate:
 
     # --- single-turn generation prompt ---
 
-    def test_default_keeps_think_tag(self, olmo3_tokenizer) -> None:
-        """add_generation_reasoning=True (default): template tag kept, no duplicate."""
+    def test_default_passthrough(self, olmo3_tokenizer) -> None:
+        """add_generation_reasoning=None (default): template output returned as-is."""
         base = _base(olmo3_tokenizer, [{"role": "user", "content": "q"}])
-        expected = base.rstrip("\n")  # tag already present; nothing added
 
         result = apply_chat_template(
             conversation=[{"role": "user", "content": "q"}],
             tokenizer=olmo3_tokenizer,
         )
 
-        assert result == expected
+        assert result == base
 
     def test_think_prefix_seeded(self, olmo3_tokenizer) -> None:
         """think_prefix is injected after the template-provided open tag."""
@@ -303,7 +299,7 @@ class TestOlmo3ChatTemplate:
             },
             {"role": "user", "content": "And 3+3?"},
         ]
-        expected = _base(olmo3_tokenizer, modified).rstrip("\n")
+        expected = _base(olmo3_tokenizer, modified)
 
         result = apply_chat_template(
             conversation=[
@@ -327,7 +323,7 @@ class TestOlmo3ChatTemplate:
             {"role": "assistant", "content": _embed_blank("4", "<think>", "</think>")},
             {"role": "user", "content": "And 3+3?"},
         ]
-        expected = _base(olmo3_tokenizer, modified).rstrip("\n")
+        expected = _base(olmo3_tokenizer, modified)
 
         result = apply_chat_template(
             conversation=[
@@ -347,7 +343,7 @@ class TestOlmo3ChatTemplate:
             {"role": "assistant", "content": "4"},
             {"role": "user", "content": "And 3+3?"},
         ]
-        expected = _base(olmo3_tokenizer, msgs).rstrip("\n")
+        expected = _base(olmo3_tokenizer, msgs)
 
         result = apply_chat_template(
             conversation=msgs,
@@ -362,8 +358,7 @@ class TestOlmo3ChatTemplate:
             [{"role": "user", "content": "What is 1+1?"}],
             [{"role": "user", "content": "What is 2+2?"}],
         ]
-        # prefixed model: template already has the tag; default just returns rstripped base
-        expected = [_base(olmo3_tokenizer, c).rstrip("\n") for c in convs]
+        expected = [_base(olmo3_tokenizer, c) for c in convs]
 
         result = apply_chat_templates(conversations=convs, tokenizer=olmo3_tokenizer)
 
@@ -381,10 +376,9 @@ class TestMinistralChatTemplate:
 
     # --- single-turn generation prompt ---
 
-    def test_default_adds_think_tag(self, ministral_tokenizer) -> None:
-        """add_generation_reasoning=True (default): [THINK] tag appended after the prompt."""
+    def test_default_passthrough(self, ministral_tokenizer) -> None:
+        """add_generation_reasoning=None (default): template output returned as-is, no tag added."""
         base = _base(ministral_tokenizer, [{"role": "user", "content": "q"}])
-        expected = base.rstrip("\n") + "\n[THINK]\n"
 
         result = apply_chat_template(
             conversation=[{"role": "user", "content": "q"}],
@@ -392,7 +386,7 @@ class TestMinistralChatTemplate:
             override_tag="[THINK]",
         )
 
-        assert result == expected
+        assert result == base
 
     def test_think_prefix_seeded(self, ministral_tokenizer) -> None:
         """think_prefix is injected after the opening bracket tag."""
@@ -462,7 +456,7 @@ class TestMinistralChatTemplate:
             },
             {"role": "user", "content": "And 3+3?"},
         ]
-        expected = _base(ministral_tokenizer, modified).rstrip("\n") + "\n[THINK]\n"
+        expected = _base(ministral_tokenizer, modified)
 
         result = apply_chat_template(
             conversation=[
@@ -487,7 +481,7 @@ class TestMinistralChatTemplate:
             {"role": "assistant", "content": _embed_blank("4", "[THINK]", "[/THINK]")},
             {"role": "user", "content": "And 3+3?"},
         ]
-        expected = _base(ministral_tokenizer, modified).rstrip("\n") + "\n[THINK]\n"
+        expected = _base(ministral_tokenizer, modified)
 
         result = apply_chat_template(
             conversation=[
@@ -508,7 +502,7 @@ class TestMinistralChatTemplate:
             {"role": "assistant", "content": "4"},
             {"role": "user", "content": "And 3+3?"},
         ]
-        expected = _base(ministral_tokenizer, msgs).rstrip("\n") + "\n[THINK]\n"
+        expected = _base(ministral_tokenizer, msgs)
 
         result = apply_chat_template(
             conversation=msgs,
@@ -524,14 +518,190 @@ class TestMinistralChatTemplate:
             [{"role": "user", "content": "What is 1+1?"}],
             [{"role": "user", "content": "What is 2+2?"}],
         ]
-        expected = [
-            _base(ministral_tokenizer, c).rstrip("\n") + "\n[THINK]\n" for c in convs
-        ]
+        expected = [_base(ministral_tokenizer, c) for c in convs]
 
         result = apply_chat_templates(
             conversations=convs,
             tokenizer=ministral_tokenizer,
             override_tag="[THINK]",
+        )
+
+        assert result == expected
+
+
+# ---------------------------------------------------------------------------
+# DeepSeek-R1-Distill-Llama — prefixed, <think> tags, strips history think blocks
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+class TestDeepSeekR1LlamaChatTemplate:
+    """apply_chat_template() tests for deepseek-ai/DeepSeek-R1-Distill-Llama-8B.
+
+    Prefixed model (<think> tag is injected into the generation prompt by the
+    template). The template also strips <think>...</think> blocks from assistant
+    messages when rendering multi-turn history, so reasoning provided in history
+    turns is silently removed from the rendered output.
+    """
+
+    # --- single-turn generation prompt ---
+
+    def test_default_passthrough(self, deepseek_r1_llama_tokenizer) -> None:
+        """add_generation_reasoning=None (default): template output returned as-is."""
+        base = _base(deepseek_r1_llama_tokenizer, [{"role": "user", "content": "q"}])
+
+        result = apply_chat_template(
+            conversation=[{"role": "user", "content": "q"}],
+            tokenizer=deepseek_r1_llama_tokenizer,
+        )
+
+        assert result == base
+
+    def test_think_prefix_seeded(self, deepseek_r1_llama_tokenizer) -> None:
+        """think_prefix is injected after the template-provided open tag."""
+        base = _base(deepseek_r1_llama_tokenizer, [{"role": "user", "content": "q"}])
+        expected = base.rstrip("\n") + "\nOkay, "
+
+        result = apply_chat_template(
+            conversation=[{"role": "user", "content": "q"}],
+            tokenizer=deepseek_r1_llama_tokenizer,
+            think_prefix="Okay, ",
+        )
+
+        assert result == expected
+
+    def test_no_reasoning_strips_tag(self, deepseek_r1_llama_tokenizer) -> None:
+        """add_generation_reasoning=False: template-injected <think> is stripped."""
+        base = _base(deepseek_r1_llama_tokenizer, [{"role": "user", "content": "q"}])
+        # remove the trailing <think> that the template appended
+        expected = base.rstrip("\n")[: -len("<think>")]
+
+        result = apply_chat_template(
+            conversation=[{"role": "user", "content": "q"}],
+            tokenizer=deepseek_r1_llama_tokenizer,
+            add_generation_reasoning=False,
+        )
+
+        assert result == expected
+
+    def test_no_reasoning_with_response_prefix(
+        self, deepseek_r1_llama_tokenizer
+    ) -> None:
+        """add_generation_reasoning=False with response_prefix: tag stripped then response seeded."""
+        base = _base(deepseek_r1_llama_tokenizer, [{"role": "user", "content": "q"}])
+        expected = base.rstrip("\n")[: -len("<think>")] + "\nAnswer:"
+
+        result = apply_chat_template(
+            conversation=[{"role": "user", "content": "q"}],
+            tokenizer=deepseek_r1_llama_tokenizer,
+            add_generation_reasoning=False,
+            response_prefix="Answer:",
+        )
+
+        assert result == expected
+
+    def test_passive_keeps_original(self, deepseek_r1_llama_tokenizer) -> None:
+        """add_generation_reasoning=None: original template string returned unchanged."""
+        base = _base(deepseek_r1_llama_tokenizer, [{"role": "user", "content": "q"}])
+
+        result = apply_chat_template(
+            conversation=[{"role": "user", "content": "q"}],
+            tokenizer=deepseek_r1_llama_tokenizer,
+            add_generation_reasoning=None,
+        )
+
+        assert result == base
+
+    def test_none_with_response_prefix(self, deepseek_r1_llama_tokenizer) -> None:
+        """add_generation_reasoning=None with response_prefix: tag closed then response seeded."""
+        base = _base(deepseek_r1_llama_tokenizer, [{"role": "user", "content": "q"}])
+        expected = base.rstrip("\n") + "\n</think>\nAnswer:"
+
+        result = apply_chat_template(
+            conversation=[{"role": "user", "content": "q"}],
+            tokenizer=deepseek_r1_llama_tokenizer,
+            add_generation_reasoning=None,
+            response_prefix="Answer:",
+        )
+
+        assert result == expected
+
+    # --- multi-turn history ---
+
+    def test_multi_turn_with_reasoning(self, deepseek_r1_llama_tokenizer) -> None:
+        """Template strips the embedded <think>...</think> block from history; only content remains."""
+        # the template removes <think>...</think> blocks from assistant messages, so the
+        # expected output matches messages without any embedded reasoning
+        msgs = [
+            {"role": "user", "content": "What is 2+2?"},
+            {"role": "assistant", "content": "4"},
+            {"role": "user", "content": "And 3+3?"},
+        ]
+        expected = _base(deepseek_r1_llama_tokenizer, msgs)
+
+        result = apply_chat_template(
+            conversation=[
+                {"role": "user", "content": "What is 2+2?"},
+                {
+                    "role": "assistant",
+                    "content": "4",
+                    "reasoning": "two plus two is four",
+                },
+                {"role": "user", "content": "And 3+3?"},
+            ],
+            tokenizer=deepseek_r1_llama_tokenizer,
+        )
+
+        assert result == expected
+
+    def test_multi_turn_blank_reasoning(self, deepseek_r1_llama_tokenizer) -> None:
+        """Template strips the empty <think>\\n</think> block from history too."""
+        # same result as with reasoning — the template removes any think block regardless
+        msgs = [
+            {"role": "user", "content": "What is 2+2?"},
+            {"role": "assistant", "content": "4"},
+            {"role": "user", "content": "And 3+3?"},
+        ]
+        expected = _base(deepseek_r1_llama_tokenizer, msgs)
+
+        result = apply_chat_template(
+            conversation=[
+                {"role": "user", "content": "What is 2+2?"},
+                {"role": "assistant", "content": "4", "reasoning": ""},
+                {"role": "user", "content": "And 3+3?"},
+            ],
+            tokenizer=deepseek_r1_llama_tokenizer,
+        )
+
+        assert result == expected
+
+    def test_multi_turn_no_reasoning_key(self, deepseek_r1_llama_tokenizer) -> None:
+        """Absent reasoning key passes the assistant turn through unchanged."""
+        msgs = [
+            {"role": "user", "content": "What is 2+2?"},
+            {"role": "assistant", "content": "4"},
+            {"role": "user", "content": "And 3+3?"},
+        ]
+        expected = _base(deepseek_r1_llama_tokenizer, msgs)
+
+        result = apply_chat_template(
+            conversation=msgs,
+            tokenizer=deepseek_r1_llama_tokenizer,
+        )
+
+        assert result == expected
+
+    def test_batching(self, deepseek_r1_llama_tokenizer) -> None:
+        """apply_chat_templates returns one correctly built string per conversation."""
+        convs = [
+            [{"role": "user", "content": "What is 1+1?"}],
+            [{"role": "user", "content": "What is 2+2?"}],
+        ]
+        expected = [_base(deepseek_r1_llama_tokenizer, c) for c in convs]
+
+        result = apply_chat_templates(
+            conversations=convs,
+            tokenizer=deepseek_r1_llama_tokenizer,
         )
 
         assert result == expected

@@ -110,7 +110,7 @@ def apply_chat_template(
     think_prefix: str | None = None,
     response_prefix: str | None = None,
     override_tag: str | None = None,
-    add_generation_reasoning: bool | None = True,
+    add_generation_reasoning: bool | None = None,
     add_generation_prompt: bool = True,
     **kwargs: object,
 ) -> str:
@@ -126,10 +126,10 @@ def apply_chat_template(
     embedded. If present and non-blank, a complete block wrapping the reasoning is
     embedded. This works for any model regardless of template style.
 
-    add_generation_reasoning controls the reasoning tag in the generation prompt:
-      - True  : ensure the open tag is present, adding it if needed (default).
-      - False : ensure no open tag, stripping it if a prefixed template injected one.
-      - None  : leave the template output unchanged.
+    add_generation_reasoning controls the open reasoning tag in the generation prompt:
+      - None  : leave the template output unchanged (default).
+      - True  : ensure the open tag is present, adding it for non-prefixed models.
+      - False : strip the open tag if a prefixed template injected one.
 
     think_prefix seeds the model's reasoning inside the open block.
     response_prefix seeds the response after the block closes.
@@ -209,7 +209,7 @@ def apply_chat_templates(
     think_prefix: str | list[str] | None = None,
     response_prefix: str | list[str] | None = None,
     override_tag: str | None = None,
-    add_generation_reasoning: bool | None = True,
+    add_generation_reasoning: bool | None = None,
     add_generation_prompt: bool = True,
     **kwargs: object,
 ) -> list[str]:
