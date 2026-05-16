@@ -120,6 +120,29 @@ class TestQwen3ChatTemplate:
 
         assert result == base
 
+    def test_add_generation_reasoning_adds_tag_no_trailing_newline(
+        self, qwen3_tokenizer
+    ) -> None:
+        """add_generation_reasoning=True: open tag appended without a trailing newline.
+
+        A non-prefixed template doesn't inject <think>, so the tag must be added. The
+        result must end with exactly '<think>' — no extra '\\n' after the tag — so that
+        the model starts generating inside the block rather than on a blank line.
+        """
+        base = _base(qwen3_tokenizer, [{"role": "user", "content": "q"}])
+        # expect the tag to be appended directly, with no trailing newline
+        expected = base.rstrip("\n") + "\n<think>"
+
+        result = apply_chat_template(
+            conversation=[{"role": "user", "content": "q"}],
+            tokenizer=qwen3_tokenizer,
+            add_generation_reasoning=True,
+            add_generation_prompt=True,
+        )
+
+        assert result == expected
+        assert not result.endswith("\n"), "open tag must not be followed by a newline"
+
     # --- multi-turn history ---
 
     def test_multi_turn_with_reasoning(self, qwen3_tokenizer) -> None:
@@ -473,6 +496,28 @@ class TestMinistralChatTemplate:
         )
 
         assert result == base
+
+    def test_add_generation_reasoning_adds_tag_no_trailing_newline(
+        self, ministral_tokenizer
+    ) -> None:
+        """add_generation_reasoning=True: open tag appended without a trailing newline.
+
+        Same contract as the Qwen3 variant but exercised with bracket-style tags to
+        confirm the behaviour is tag-format-agnostic.
+        """
+        base = _base(ministral_tokenizer, [{"role": "user", "content": "q"}])
+        expected = base.rstrip("\n") + "\n[THINK]"
+
+        result = apply_chat_template(
+            conversation=[{"role": "user", "content": "q"}],
+            tokenizer=ministral_tokenizer,
+            override_tag="[THINK]",
+            add_generation_reasoning=True,
+            add_generation_prompt=True,
+        )
+
+        assert result == expected
+        assert not result.endswith("\n"), "open tag must not be followed by a newline"
 
     # --- multi-turn history ---
 

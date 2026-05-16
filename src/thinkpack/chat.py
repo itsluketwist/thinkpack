@@ -40,7 +40,7 @@ def _inject_prefixes(
             return _prompt[: -len(open_tag)]
         elif include_reasoning is True and not already_open:
             # ensure the open tag is present, adding it if needed
-            return _prompt + f"\n{open_tag}\n"
+            return _prompt + f"\n{open_tag}"
 
         # include_reasoning=True + already_open, or False + not already_open: nothing to do
         return _prompt
