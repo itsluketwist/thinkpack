@@ -14,7 +14,7 @@ where = ["src"]
 [project]
 name = "thinkpack"
 dynamic = ["version"]
-description = "A framework for training, parsing, and evaluating explicit reasoning models — focused on reasoning collapse."
+description = "A lightweight framework for reasoning-aware training, parsing, and evaluation of explicit reasoning language models."
 readme = "README.md"
 authors = [{ name = "Lukas Twist", email = "itsluketwist@gmail.com" }]
 license = { file = "LICENSE" }

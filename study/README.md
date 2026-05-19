@@ -41,6 +41,19 @@ The `data/` directory contains all datasets used:
 
 ---
 
+## *models*
+
+All models used in this study are open-weight and publicly available on HuggingFace.
+
+| Shorthand | HuggingFace ID | Link |
+|-----------|---------------|------|
+| `qwen3-8b` | `Qwen/Qwen3-8B` | [huggingface.co/Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) |
+| `olmo-3-7b` | `allenai/OLMo-3-7B-Think` | [huggingface.co/allenai/OLMo-3-7B-Think](https://huggingface.co/allenai/OLMo-3-7B-Think) |
+| `llama-r1-8b` | `deepseek-ai/DeepSeek-R1-Distill-Llama-8B` | [huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Llama-8B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Llama-8B) |
+| `nemotron-7b` | `nvidia/OpenReasoning-Nemotron-7B` | [huggingface.co/nvidia/OpenReasoning-Nemotron-7B](https://huggingface.co/nvidia/OpenReasoning-Nemotron-7B) |
+
+---
+
 ## *configuration*
 
 The `config/` directory contains the hyperparameters used in the experiments:
@@ -166,6 +179,22 @@ python train.py --model allenai/OLMo-3-7B-Think --strategy default --lr 1e-5
 python train.py --model allenai/OLMo-3-7B-Think --strategy default --lr 5e-6
 ```
 
+**`llama-r1-8b`** (`deepseek-ai/DeepSeek-R1-Distill-Llama-8B`):
+
+```bash
+python train.py --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --strategy default --lr 2e-5
+python train.py --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --strategy default --lr 1e-5
+python train.py --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --strategy default --lr 5e-6
+```
+
+**`nemotron-7b`** (`nvidia/OpenReasoning-Nemotron-7B`):
+
+```bash
+python train.py --model nvidia/OpenReasoning-Nemotron-7B --strategy default --lr 2e-5
+python train.py --model nvidia/OpenReasoning-Nemotron-7B --strategy default --lr 1e-5
+python train.py --model nvidia/OpenReasoning-Nemotron-7B --strategy default --lr 5e-6
+```
+
 ### *strategy comparison (lr = 1e-5)*
 
 Four strategies are compared at a fixed learning rate to evaluate which approaches prevent collapse.
@@ -188,6 +217,24 @@ python train.py --model allenai/OLMo-3-7B-Think --strategy mask    --lr 1e-5
 python train.py --model allenai/OLMo-3-7B-Think --strategy respond --lr 1e-5
 ```
 
+**`llama-r1-8b`** (`deepseek-ai/DeepSeek-R1-Distill-Llama-8B`):
+
+```bash
+python train.py --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --strategy bare    --lr 1e-5
+python train.py --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --strategy empty   --lr 1e-5
+python train.py --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --strategy mask    --lr 1e-5
+python train.py --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --strategy respond --lr 1e-5
+```
+
+**`nemotron-7b`** (`nvidia/OpenReasoning-Nemotron-7B`):
+
+```bash
+python train.py --model nvidia/OpenReasoning-Nemotron-7B --strategy bare    --lr 1e-5
+python train.py --model nvidia/OpenReasoning-Nemotron-7B --strategy empty   --lr 1e-5
+python train.py --model nvidia/OpenReasoning-Nemotron-7B --strategy mask    --lr 1e-5
+python train.py --model nvidia/OpenReasoning-Nemotron-7B --strategy respond --lr 1e-5
+```
+
 ### *evaluation*
 
 In both cases, each saved checkpoint should be evaluated against all three benchmarks.
@@ -196,4 +243,16 @@ In both cases, each saved checkpoint should be evaluated against all three bench
 python evaluate.py --model Qwen/Qwen3-8B --adapter output/qwen3-8b-mask/adapter --dataset chemistry
 python evaluate.py --model Qwen/Qwen3-8B --adapter output/qwen3-8b-mask/adapter --dataset gsm8k
 python evaluate.py --model Qwen/Qwen3-8B --adapter output/qwen3-8b-mask/adapter --dataset evalplus
+
+python evaluate.py --model allenai/OLMo-3-7B-Think --adapter output/olmo-3-7b-think-mask/adapter --dataset chemistry
+python evaluate.py --model allenai/OLMo-3-7B-Think --adapter output/olmo-3-7b-think-mask/adapter --dataset gsm8k
+python evaluate.py --model allenai/OLMo-3-7B-Think --adapter output/olmo-3-7b-think-mask/adapter --dataset evalplus
+
+python evaluate.py --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --adapter output/deepseek-r1-distill-llama-8b-mask/adapter --dataset chemistry
+python evaluate.py --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --adapter output/deepseek-r1-distill-llama-8b-mask/adapter --dataset gsm8k
+python evaluate.py --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B --adapter output/deepseek-r1-distill-llama-8b-mask/adapter --dataset evalplus
+
+python evaluate.py --model nvidia/OpenReasoning-Nemotron-7B --adapter output/openreasoning-nemotron-7b-mask/adapter --dataset chemistry
+python evaluate.py --model nvidia/OpenReasoning-Nemotron-7B --adapter output/openreasoning-nemotron-7b-mask/adapter --dataset gsm8k
+python evaluate.py --model nvidia/OpenReasoning-Nemotron-7B --adapter output/openreasoning-nemotron-7b-mask/adapter --dataset evalplus
 ```
