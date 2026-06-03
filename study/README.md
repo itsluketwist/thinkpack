@@ -107,7 +107,7 @@ Training artefacts (the LoRA adapter) are saved to `output/<model>-<strategy>/ad
 | `--model` | required | HuggingFace model name or local path |
 | `--strategy` | `default` | Reasoning strategy (see table above) |
 | `--lr` | `1e-5` | Learning rate — the primary experimental variable |
-| `--seed` | `42` | Random seed |
+| `--seed` | `42` | Random seed, we use both `42` and `67` in our experiments |
 | `--output` | `output/<model>-<strategy>/` | Directory to save the adapter |
 | `--profile` | `default` | Hyperparameter profile in `config/train.yaml` |
 
