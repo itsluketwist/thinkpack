@@ -14,6 +14,8 @@ Focussed on the characterisation and mitigation of **reasoning-trace collapse**.
 - 📊 **[Statistics](#thinkpackstats--response-statistics)** (`thinkpack.stats`) — aggregates parsed responses into VR, ER, TR, MR, and Rpass@1, making reasoning-trace collapse measurable.
 - 🎭 **[Loss masking](#thinkpackmask--training-time-loss-masking)** (`thinkpack.mask`) — the core method; prevents reasoning-trace collapse during fine-tuning by masking think blocks from the loss.
 
+> 📄 Accompanies the paper [**Reasoning-Trace Collapse: Evaluating the Loss of Explicit Reasoning During Fine-Tuning**](https://arxiv.org/abs/2605.21127), accepted to the NeurIPS 2026 Evaluations and Datasets Track — see [*citation*](#citation).
+
 ---
 
 ## *reasoning-trace collapse*
@@ -222,3 +224,30 @@ thinkpack skill
 ## *contributing*
 
 Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for how to get involved, and [DEVELOPMENT.md](DEVELOPMENT.md) for environment setup.
+
+---
+
+## *citation*
+
+This work was part of the paper [**Reasoning-Trace Collapse: Evaluating the Loss of Explicit Reasoning During Fine-Tuning**](https://arxiv.org/abs/2605.21127).
+We hope you find ***`ThinkPack`*** useful! If it helps your research, please consider citing the paper:
+
+**Reference:**
+
+```
+Lukas Twist, Helen Yannakoudakis, and Jie M. Zhang. 2026. Reasoning-Trace Collapse: Evaluating the Loss of Explicit Reasoning During Fine-Tuning. In Advances in Neural Information Processing Systems: Evaluations and Datasets Track, Sydney, Australia.
+```
+
+**BibTeX:**
+
+```
+@inproceedings{twistReasoningCollapse2026,
+  title = {{Reasoning-Trace Collapse: Evaluating the Loss of Explicit Reasoning During Fine-Tuning}},
+  author = {Twist, Lukas and Yannakoudakis, Helen and Zhang, Jie M.},
+  booktitle = {Advances in Neural Information Processing Systems: Evaluations and Datasets Track},
+  location = {Sydney, Australia},
+  year = {2026},
+  month = {December},
+  url = {https://arxiv.org/abs/2605.21127},
+}
+```
