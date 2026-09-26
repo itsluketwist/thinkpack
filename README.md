@@ -322,3 +322,10 @@ Lukas Twist, Helen Yannakoudakis, and Jie M. Zhang. 2026. Reasoning-Trace Collap
   url = {https://arxiv.org/abs/2605.21127},
 }
 ```
+
+---
+
+## *licence*
+
+***`ThinkPack`*** is released under the [MIT License](LICENSE).
+The datasets in [`study/data`](study/data) are derived from public benchmarks, and keep the licences of their original sources.
