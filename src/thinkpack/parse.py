@@ -4,7 +4,12 @@ import dataclasses
 from dataclasses import dataclass
 from typing import cast, overload
 
-from thinkpack.model import ModelInfo, _Tokenizer, _unwrap_tokenizer, get_model_info
+from thinkpack.model import (
+    ModelInfo,
+    _resolve_model_info,
+    _Tokenizer,
+    _unwrap_tokenizer,
+)
 
 
 @dataclass
@@ -232,14 +237,12 @@ def parse(
     if tokenizer is not None:
         tokenizer = _unwrap_tokenizer(tokenizer)
 
-    if model_info is not None:
-        # an explicit model_info takes precedence over detection from the tokenizer
-        if override_tag is not None:
-            model_info = model_info.with_tag(override_tag)
-    elif tokenizer is not None:
-        model_info = get_model_info(tokenizer=tokenizer, override_tag=override_tag)
-    else:
-        raise ValueError("One of tokenizer or model_info must be provided.")
+    # an explicit model_info takes precedence over detection from the tokenizer
+    model_info = _resolve_model_info(
+        tokenizer=tokenizer,
+        model_info=model_info,
+        override_tag=override_tag,
+    )
 
     # decide whether the output starts inside an open reasoning block: an explicit
     # add_generation_reasoning wins, otherwise check the prompt if one was given

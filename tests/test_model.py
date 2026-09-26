@@ -350,6 +350,77 @@ class TestDetectModelStub:
         assert caplog.text == ""
 
 
+@pytest.mark.usefixtures("clear_detection_cache")
+class TestResolveModelInfo:
+    """_resolve_model_info() chooses between a custom ModelInfo and detection."""
+
+    def test_custom_info_skips_detection(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A custom model_info is returned as-is, and the tokenizer is never inspected."""
+        # the template has no known tag, so detection would log a warning
+        tokenizer = _stub(chat_template="no reasoning tags here")
+        custom = ModelInfo(
+            prefixed=True,
+            tag_content="REASONING",
+            tag_style=TagStyle.BRACKET,
+        )
+
+        with caplog.at_level(logging.WARNING, logger="thinkpack"):
+            result = model_module._resolve_model_info(
+                tokenizer=tokenizer,
+                model_info=custom,
+                override_tag=None,
+            )
+
+        assert result == custom
+        assert caplog.text == ""
+        assert model_module._cache == {}
+
+    def test_override_tag_applied_to_custom_info(self) -> None:
+        """override_tag replaces the tag of a custom model_info, keeping other fields."""
+        custom = ModelInfo(
+            prefixed=True,
+            strips_think_tags=True,
+        )
+
+        result = model_module._resolve_model_info(
+            tokenizer=None,
+            model_info=custom,
+            override_tag="[THINK]",
+        )
+
+        assert result.open_tag == "[THINK]"
+        assert result.prefixed is True
+        assert result.strips_think_tags is True
+
+    def test_detects_without_custom_info(self) -> None:
+        """With no custom model_info, the format is detected from the tokenizer."""
+        tokenizer = _stub(
+            chat_template="uses <thinking> tags",
+            gen_suffix="<thinking>",
+        )
+
+        result = model_module._resolve_model_info(
+            tokenizer=tokenizer,
+            model_info=None,
+            override_tag=None,
+        )
+
+        assert result.tag_content == "thinking"
+        assert result.prefixed is True
+
+    def test_neither_given_raises(self) -> None:
+        """Without a tokenizer or model_info there is nothing to work from."""
+        with pytest.raises(ValueError, match="tokenizer or model_info"):
+            model_module._resolve_model_info(
+                tokenizer=None,
+                model_info=None,
+                override_tag=None,
+            )
+
+
 # ---------------------------------------------------------------------------
 # reasoning stripping and tokenizer health — real tokenizers, marked slow
 # ---------------------------------------------------------------------------

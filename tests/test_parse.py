@@ -177,6 +177,19 @@ class TestParseCustomTag:
         assert result.has_missing_reasoning is True
         assert result.answer == response
 
+    def test_override_tag_applied_to_model_info(self) -> None:
+        """override_tag replaces the tag of an explicit model_info."""
+        response = "<reasoning>\nsome thoughts\n</reasoning>\nthe answer"
+        result = parse(
+            response=response,
+            model_info=_BRACKET_THINK,
+            override_tag="<reasoning>",
+        )
+
+        assert result.reasoning_tag == "reasoning"
+        assert result.reasoning == "some thoughts"
+        assert result.answer == "the answer"
+
 
 class TestParseBatch:
     """Tests for parse() with list[str] and list[list[str]] inputs."""

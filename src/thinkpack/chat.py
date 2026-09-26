@@ -1,6 +1,11 @@
 """Chat templating that works across reasoning models, with optional thought-steering."""
 
-from thinkpack.model import ModelInfo, _Tokenizer, _unwrap_tokenizer, get_model_info
+from thinkpack.model import (
+    ModelInfo,
+    _resolve_model_info,
+    _Tokenizer,
+    _unwrap_tokenizer,
+)
 
 
 def _inject_prefixes(
@@ -163,6 +168,7 @@ def apply_chat_template(
     add_generation_reasoning: bool | None = None,
     add_history_reasoning: bool | None = None,
     add_generation_prompt: bool | None = None,
+    model_info: ModelInfo | None = None,
     **kwargs: object,
 ) -> str:
     """
@@ -192,6 +198,8 @@ def apply_chat_template(
     think_prefix seeds the model's reasoning inside an open reasoning block.
     response_prefix seeds the response, closing any open reasoning block first.
     override_tag replaces the detected reasoning tag, e.g. "<reasoning>".
+    model_info is a custom ModelInfo to use instead of detecting one from the
+    tokenizer (its prefixed field is not used here, as the prompt is checked directly).
     Any other kwargs are passed to tokenizer.apply_chat_template().
 
     Returns the templated prompt string.
@@ -214,11 +222,14 @@ def apply_chat_template(
     # multimodal processors wrap the text tokenizer — use the tokenizer directly
     tokenizer = _unwrap_tokenizer(tokenizer)
 
-    # detect the model's reasoning format, then embed any reasoning into the messages
-    model_info = get_model_info(
+    # use the custom model_info if given, otherwise detect the model's reasoning format
+    model_info = _resolve_model_info(
         tokenizer=tokenizer,
+        model_info=model_info,
         override_tag=override_tag,
     )
+
+    # embed any reasoning into the messages
     prepared, sentinel_map = _prepare_messages(
         messages=conversation,
         model_info=model_info,
@@ -280,6 +291,7 @@ def apply_chat_templates(
     add_generation_reasoning: bool | None = None,
     add_history_reasoning: bool | None = None,
     add_generation_prompt: bool | None = None,
+    model_info: ModelInfo | None = None,
     **kwargs: object,
 ) -> list[str]:
     """
@@ -313,6 +325,7 @@ def apply_chat_templates(
             add_generation_reasoning=add_generation_reasoning,
             add_history_reasoning=add_history_reasoning,
             add_generation_prompt=add_generation_prompt,
+            model_info=model_info,
             **kwargs,
         )
         for i, conv in enumerate(conversations)

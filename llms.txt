@@ -41,7 +41,7 @@ Every function detects the model's reasoning format from the tokenizer's chat te
 - `strips_think_tags` — true if the template strips reasoning from the final assistant message (e.g. DeepSeek-R1).
 - `strips_history_think_tags` — true if the template strips reasoning from earlier assistant messages (e.g. Qwen3, Qwen3.5).
 
-Pass `override_tag=` (e.g. `"<reasoning>"` or `"[THINK]"`) to any function if the wrong tag is detected. Multimodal processors (e.g. Qwen3.5 via `AutoProcessor`) can be passed wherever a tokenizer is expected.
+Pass `override_tag=` (e.g. `"<reasoning>"` or `"[THINK]"`) to any function if the wrong tag is detected, or pass a custom `ModelInfo` as `model_info=` to skip detection entirely (`parse()` then needs no tokenizer). `prefixed` is only used by `parse()`, as templating checks the rendered prompt directly. Multimodal processors (e.g. Qwen3.5 via `AutoProcessor`) can be passed wherever a tokenizer is expected.
 
 ## Module overview
 
@@ -82,7 +82,7 @@ thinkpack.apply_chat_template(conversation, tokenizer, add_generation_prompt=Tru
 thinkpack.apply_chat_templates(conversations, tokenizer, add_generation_prompt=True) # -> list[str]
 # add_generation_prompt is passed to the tokenizer, which defaults to False — pass True for generation prompts
 # assistant messages may include a "reasoning" key, embedded as the think block
-# options: think_prefix, response_prefix, override_tag,
+# options: think_prefix, response_prefix, override_tag, model_info (skips detection),
 #   add_generation_reasoning (None = unchanged | True = ensure open tag | False = remove open tag),
 #   add_history_reasoning (None = template decides | True = always keep | False = always drop)
 # any other kwargs are passed to tokenizer.apply_chat_template()
@@ -100,7 +100,7 @@ thinkpack.ResponseStats                 # dataclass: total, valid_reasoning_rate
 # training (loss masking — can help mitigate collapse)
 thinkpack.apply_mask(conversations, tokenizer, masked=thinkpack.MaskType.THINK)  # -> Dataset (input_ids, labels, attention_mask)
 thinkpack.MaskType                      # IntFlag: PROMPT | THINK | RESPONSE, combine with |; masked=None trains on all tokens
-# options: max_seq_length=32768, ignore_index=-100, override_tag, add_history_reasoning
+# options: max_seq_length=32768, ignore_index=-100, override_tag, model_info (skips detection), add_history_reasoning
 # each conversation must end with the assistant message to train on; requires a fast tokenizer
 # sequences are not padded — use a collator that pads labels with -100, e.g. DataCollatorForSeq2Seq
 

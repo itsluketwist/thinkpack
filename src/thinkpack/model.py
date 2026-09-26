@@ -357,3 +357,28 @@ def get_model_info(
     if override_tag is not None:
         model_info = model_info.with_tag(override_tag)
     return model_info
+
+
+def _resolve_model_info(
+    tokenizer: _Tokenizer | None,
+    model_info: ModelInfo | None,
+    override_tag: str | None,
+) -> ModelInfo:
+    """
+    Choose the ModelInfo to use: a custom one if given, otherwise detect it.
+
+    A custom model_info skips detection entirely, which allows models whose format is
+    not detected correctly. override_tag is applied on top in either case.
+
+    Returns the ModelInfo with any tag override applied.
+    """
+    if model_info is None:
+        if tokenizer is None:
+            raise ValueError("One of tokenizer or model_info must be provided.")
+        # no custom info, so detect it from the tokenizer's chat template
+        return get_model_info(tokenizer=tokenizer, override_tag=override_tag)
+
+    # a custom model_info is used as-is, apart from any tag override
+    if override_tag is not None:
+        model_info = model_info.with_tag(override_tag)
+    return model_info

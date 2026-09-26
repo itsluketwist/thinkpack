@@ -64,6 +64,7 @@ Multimodal processors (e.g. Qwen3.5 loaded via `AutoProcessor` or unsloth) can b
 Every function detects the model's reasoning format from the tokenizer's chat template: the reasoning tag, whether the template opens the reasoning block in the generation prompt, and whether it strips reasoning from earlier messages.
 So the same code works across models, with no per-model configuration.
 Call `thinkpack.detect_model(tokenizer)` to see what was detected, and pass `override_tag=` (e.g. `"<reasoning>"`) to any function if the wrong tag is found.
+For full control, pass a custom `thinkpack.ModelInfo` as `model_info=` to any function to skip detection entirely — `parse()` then needs no tokenizer at all.
 
 ### `thinkpack.chat` — Chat templating
 

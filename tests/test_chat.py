@@ -13,6 +13,7 @@ Skip with: pytest --no-slow
 import pytest
 
 from thinkpack.chat import apply_chat_template, apply_chat_templates
+from thinkpack.model import ModelInfo
 
 
 # ---------------------------------------------------------------------------
@@ -1024,3 +1025,92 @@ class TestHistoryReasoning:
         )
 
         assert result.count(_FINAL_REASONING) == 1
+
+
+# ---------------------------------------------------------------------------
+# custom ModelInfo — detection is skipped and the given format is used
+# ---------------------------------------------------------------------------
+
+
+# a custom format for Qwen3, using <reasoning> tags instead of the detected <think>
+_CUSTOM_INFO = ModelInfo(
+    prefixed=False,
+    tag_content="reasoning",
+)
+
+
+@pytest.mark.slow
+class TestCustomModelInfo:
+    """apply_chat_template() with a custom ModelInfo passed instead of detection."""
+
+    def test_custom_tag_used(self, qwen3_tokenizer) -> None:
+        """The custom tag opens the reasoning block, not the detected <think> tag."""
+        base = _base(qwen3_tokenizer, [{"role": "user", "content": "q"}])
+        expected = base.rstrip("\n") + "\n<reasoning>\nOkay, "
+
+        result = apply_chat_template(
+            conversation=[{"role": "user", "content": "q"}],
+            tokenizer=qwen3_tokenizer,
+            think_prefix="Okay, ",
+            add_generation_prompt=True,
+            model_info=_CUSTOM_INFO,
+        )
+
+        assert result == expected
+
+    def test_override_tag_applied_on_top(self, qwen3_tokenizer) -> None:
+        """override_tag replaces the tag of the custom model_info."""
+        base = _base(qwen3_tokenizer, [{"role": "user", "content": "q"}])
+        expected = base.rstrip("\n") + "\n[THINK]\nOkay, "
+
+        result = apply_chat_template(
+            conversation=[{"role": "user", "content": "q"}],
+            tokenizer=qwen3_tokenizer,
+            think_prefix="Okay, ",
+            override_tag="[THINK]",
+            add_generation_prompt=True,
+            model_info=_CUSTOM_INFO,
+        )
+
+        assert result == expected
+
+    def test_custom_stripping_flags_used(self, qwen3_tokenizer) -> None:
+        """The custom stripping flags are trusted over what detection would find.
+
+        Qwen3 strips history reasoning, so detection would protect it when
+        add_history_reasoning=True. A custom model_info saying it does not strip is
+        used as given, so the template strips the reasoning.
+        """
+        result = apply_chat_template(
+            conversation=_history_conversation(),
+            tokenizer=qwen3_tokenizer,
+            add_history_reasoning=True,
+            add_generation_prompt=True,
+            model_info=ModelInfo(
+                prefixed=False,
+                strips_history_think_tags=False,
+            ),
+        )
+
+        assert _HISTORY_REASONING not in result
+
+    def test_batching(self, qwen3_tokenizer) -> None:
+        """apply_chat_templates passes the custom model_info to every conversation."""
+        convs = [
+            [{"role": "user", "content": "What is 1+1?"}],
+            [{"role": "user", "content": "What is 2+2?"}],
+        ]
+        expected = [
+            _base(qwen3_tokenizer, c).rstrip("\n") + "\n<reasoning>\nOkay, "
+            for c in convs
+        ]
+
+        result = apply_chat_templates(
+            conversations=convs,
+            tokenizer=qwen3_tokenizer,
+            think_prefix="Okay, ",
+            add_generation_prompt=True,
+            model_info=_CUSTOM_INFO,
+        )
+
+        assert result == expected

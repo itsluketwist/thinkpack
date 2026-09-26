@@ -6,7 +6,12 @@ from enum import IntFlag
 from datasets import Dataset
 
 from thinkpack.chat import apply_chat_template as _apply_chat_template
-from thinkpack.model import ModelInfo, _Tokenizer, _unwrap_tokenizer, get_model_info
+from thinkpack.model import (
+    ModelInfo,
+    _resolve_model_info,
+    _Tokenizer,
+    _unwrap_tokenizer,
+)
 
 
 _logger = logging.getLogger(__name__)
@@ -112,7 +117,7 @@ def _locate_sections(
         raise ValueError(
             f"Could not find the {open_tag}...{close_tag} reasoning block of the final "
             "assistant message in the templated text. Check the detected tag, or pass "
-            "override_tag."
+            "override_tag or a custom model_info."
         )
 
     # the response starts after the closing tag and any whitespace that follows it
@@ -139,7 +144,6 @@ def _tokenize_record(
     max_seq_length: int,
     masked: MaskType,
     ignore_index: int,
-    override_tag: str | None,
     add_history_reasoning: bool | None,
 ) -> tuple[dict[str, list[int]], bool]:
     """
@@ -161,14 +165,15 @@ def _tokenize_record(
     # response text of the final assistant message, used to check the boundaries
     response = conversation[-1].get("content", "")
 
-    # render the full training sequence with the chat template, reasoning included
+    # render the full training sequence with the chat template, reasoning included —
+    # the same model_info is passed, so the tags rendered are the tags searched for
     full_text = _apply_chat_template(
         conversation=conversation,
         tokenizer=tokenizer,
         add_generation_prompt=False,
         add_generation_reasoning=False,
         add_history_reasoning=add_history_reasoning,
-        override_tag=override_tag,
+        model_info=model_info,
     )
 
     # tokenize the full text, keeping each token's character span
@@ -235,6 +240,7 @@ def apply_mask(
     ignore_index: int = _DEFAULT_IGNORE_INDEX,
     override_tag: str | None = None,
     add_history_reasoning: bool | None = None,
+    model_info: ModelInfo | None = None,
 ) -> Dataset:
     """
     Tokenize training conversations and mask selected sections from the loss.
@@ -246,8 +252,9 @@ def apply_mask(
     masked=None to train on all tokens.
 
     add_history_reasoning controls reasoning on earlier assistant messages, as in
-    apply_chat_template(). override_tag replaces the detected reasoning tag. A fast
-    tokenizer is required. Sequences longer than max_seq_length are truncated, and a
+    apply_chat_template(). override_tag replaces the detected reasoning tag, and
+    model_info is a custom ModelInfo to use instead of detecting one from the tokenizer
+    (its prefixed field is not used here). A fast tokenizer is required. Sequences longer than max_seq_length are truncated, and a
     warning is logged if any are truncated or left with no trainable tokens.
 
     The sequences are not padded, so train with a collator that pads labels with
@@ -257,7 +264,13 @@ def apply_mask(
     """
     # multimodal processors wrap the text tokenizer — use the tokenizer directly
     tokenizer = _unwrap_tokenizer(tokenizer)
-    model_info = get_model_info(tokenizer=tokenizer, override_tag=override_tag)
+
+    # use the custom model_info if given, otherwise detect the model's reasoning format
+    model_info = _resolve_model_info(
+        tokenizer=tokenizer,
+        model_info=model_info,
+        override_tag=override_tag,
+    )
 
     # treat masked=None as an empty mask, so the checks below stay simple
     effective_masked = masked if masked is not None else MaskType(0)
@@ -287,7 +300,6 @@ def apply_mask(
                 max_seq_length=max_seq_length,
                 masked=effective_masked,
                 ignore_index=ignore_index,
-                override_tag=override_tag,
                 add_history_reasoning=add_history_reasoning,
             )
         except ValueError as error:

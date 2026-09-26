@@ -6,6 +6,7 @@ from typing import Any, cast
 import pytest
 
 from thinkpack.mask import MaskType, apply_mask
+from thinkpack.model import ModelInfo
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +265,26 @@ class TestMaskMiscellaneous:
         assert -100 in ds[0]["labels"]
         row = ds[0]
         assert "detailed reasoning here" in _decode_masked(qwen3_tokenizer, row)
+
+    def test_custom_model_info(self, qwen3_tokenizer) -> None:
+        """A custom model_info is used for both templating and masking."""
+        # templating and masking must share the custom tag, otherwise the block
+        # rendered with it would not be found when searching for the section bounds
+        ds = apply_mask(
+            conversations=[_conversation()],
+            tokenizer=qwen3_tokenizer,
+            masked=MaskType.THINK,
+            model_info=ModelInfo(
+                prefixed=False,
+                tag_content="reasoning",
+            ),
+        )
+        row = ds[0]
+
+        masked_text = _decode_masked(qwen3_tokenizer, row)
+        assert "<reasoning>" in masked_text
+        assert "detailed reasoning here" in masked_text
+        assert "final answer" in _decode_unmasked(qwen3_tokenizer, row)
 
     def test_multiple_conversations_all_processed(self, qwen3_tokenizer) -> None:
         """All conversations in the list are tokenized and masked independently."""
