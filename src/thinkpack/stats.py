@@ -12,7 +12,8 @@ class ResponseStats:
 
     total is a raw count; all other fields are rates in [0, 1]. For nested input
     (tasks × samples), rates are macro-averaged across tasks so each task contributes
-    equally. Token averages and pass rates are None when not applicable.
+    equally; tasks with no samples are excluded from the average. Token averages and
+    pass rates are None when not applicable.
 
     valid_reasoning_rate and invalid_reasoning_rate sum to 1. The three invalid sub-type
     rates (missing_reasoning_rate, empty_reasoning_rate, truncated_reasoning_rate) sum to
@@ -50,8 +51,10 @@ class ResponseStats:
     # (None if results not provided)
     pass_at_1: float | None = None
 
-    # fraction correct among responses with valid reasoning; macro-averaged for nested
-    # (None if results not provided or no responses had valid reasoning)
+    # fraction correct among responses with valid reasoning (None if results not provided
+    # or no responses had valid reasoning). for nested input this is macro-averaged over
+    # only the tasks with at least one valid-reasoning response, since it is undefined
+    # for the others — so it can cover fewer tasks than pass_at_1
     rpass_at_1: float | None = None
 
     @property
@@ -86,7 +89,13 @@ class ResponseStats:
 
 
 def _aggregate(task_stats: list[ResponseStats]) -> ResponseStats:
-    """Macro-average a list of per-task ResponseStats into a single ResponseStats."""
+    """Macro-average a list of per-task ResponseStats into a single ResponseStats.
+
+    Tasks with no samples have undefined rates, so they are excluded from the average
+    rather than counted as zero.
+    """
+    # exclude empty tasks — their rates are undefined, not zero
+    task_stats = [s for s in task_stats if s.total > 0]
     n = len(task_stats)
     if n == 0:
         return ResponseStats(

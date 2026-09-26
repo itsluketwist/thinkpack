@@ -43,13 +43,13 @@ def pytest_collection_modifyitems(
 
 # ---------------------------------------------------------------------------
 # real tokenizer fixtures — downloaded once per session and shared across all
-# test files. each fixture is INLINE or PREFIXED as noted.
+# test files. each fixture's template behaviour is noted in its docstring.
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="session")
 def qwen3_tokenizer():
-    """Qwen/Qwen3-8B — not prefixed, <think> tags."""
+    """Qwen/Qwen3-8B — not prefixed, <think> tags, strips history reasoning."""
     from transformers import AutoTokenizer
 
     return AutoTokenizer.from_pretrained(
@@ -60,7 +60,7 @@ def qwen3_tokenizer():
 
 @pytest.fixture(scope="session")
 def qwen35_tokenizer():
-    """Qwen/Qwen3.5-9B — prefixed, <think> tags."""
+    """Qwen/Qwen3.5-9B — prefixed, <think> tags, strips history reasoning, trims content."""
     from transformers import AutoTokenizer
 
     return AutoTokenizer.from_pretrained(
@@ -71,7 +71,7 @@ def qwen35_tokenizer():
 
 @pytest.fixture(scope="session")
 def deepseek_r1_llama_tokenizer():
-    """deepseek-ai/DeepSeek-R1-Distill-Llama-8B — prefixed, <think> tags, strips history think blocks."""
+    """deepseek-ai/DeepSeek-R1-Distill-Llama-8B — prefixed, <think> tags, strips all think blocks."""
     from transformers import AutoTokenizer
 
     return AutoTokenizer.from_pretrained(
@@ -82,7 +82,7 @@ def deepseek_r1_llama_tokenizer():
 
 @pytest.fixture(scope="session")
 def olmo3_tokenizer():
-    """allenai/OLMo-3-7B-Think —  — prefixed, <think> tags."""
+    """allenai/OLMo-3-7B-Think — prefixed, <think> tags."""
     from transformers import AutoTokenizer
 
     return AutoTokenizer.from_pretrained(
@@ -93,7 +93,7 @@ def olmo3_tokenizer():
 
 @pytest.fixture(scope="session")
 def ministral_tokenizer():
-    """mistralai/Ministral-3B-Instruct-2410 — not prefixed, [THINK] tags."""
+    """mistralai/Ministral-3-3B-Reasoning-2512 — not prefixed, [THINK] tags (also in its system prompt)."""
     from transformers import AutoTokenizer
 
     return AutoTokenizer.from_pretrained(

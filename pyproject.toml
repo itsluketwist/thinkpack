@@ -28,7 +28,10 @@ requires-python = ">=3.11"
 dependencies = [
     "datasets",
     "jinja2",
-    "transformers",
+    # transformers 5.3 to 5.12 load some byte-level tokenizers (e.g. DeepSeek-R1-Distill)
+    # with the wrong pre-tokenizer, silently dropping spaces and producing wrong token ids
+    # — see https://github.com/huggingface/transformers/issues/45488
+    "transformers>=4.57,!=5.3.*,!=5.4.*,!=5.5.*,!=5.6.*,!=5.7.*,!=5.8.*,!=5.9.*,!=5.10.*,!=5.11.*,!=5.12.*",
 ]
 
 [dependency-groups]

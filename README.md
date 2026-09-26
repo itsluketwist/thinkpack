@@ -50,6 +50,11 @@ Requires [Python 3.11+](https://www.python.org/), install directly from [PyPI](h
 pip install thinkpack
 ```
 
+**Compatibility:** tested with `transformers` 4.57 and 5.x, and with Qwen3, Qwen3.5, DeepSeek-R1-Distill, OLMo-3, and Ministral-3 reasoning models.
+`transformers` 5.3 to 5.12 are excluded: they load some byte-level tokenizers (e.g. DeepSeek-R1-Distill) with the wrong pre-tokenizer, silently producing wrong token ids ([transformers#45488](https://github.com/huggingface/transformers/issues/45488)).
+`thinkpack` also logs a warning if a tokenizer cannot round-trip plain text.
+Multimodal processors (e.g. Qwen3.5 loaded via `AutoProcessor` or unsloth) can be passed wherever a tokenizer is expected.
+
 ---
 
 ## *modules*
@@ -79,7 +84,11 @@ conversation = [
     {"role": "assistant", "reasoning": "2 + 2 = 4", "content": "4"},
     {"role": "user", "content": "And 3 + 3?"},
 ]
-prompt = thinkpack.apply_chat_template(conversation=conversation, tokenizer=tokenizer)
+prompt = thinkpack.apply_chat_template(
+    conversation=conversation,
+    tokenizer=tokenizer,
+    add_history_reasoning=True,  # keep the reasoning, even if the template strips it
+)
 
 # batch variant accepts a list of conversations
 prompts = thinkpack.apply_chat_templates(conversations=conversations, tokenizer=tokenizer)
@@ -89,9 +98,19 @@ The `add_generation_reasoning` parameter controls the reasoning tag in the gener
 
 | Value | Effect |
 |---|---|
-| `True` (default) | Ensure the opening reasoning tag is present — add it if needed |
+| `None` (default) | Leave the template output unchanged |
+| `True` | Ensure the opening reasoning tag is present — add it if needed |
 | `False` | Ensure no opening tag — strip it if a prefixed template injected one |
-| `None` | Leave the template output unchanged |
+
+The `add_history_reasoning` parameter controls reasoning on assistant messages *before the last user message*, which some templates (e.g. Qwen3, Qwen3.5, DeepSeek-R1) strip:
+
+| Value | Effect |
+|---|---|
+| `None` (default) | Embed the reasoning and let the template decide whether to keep it |
+| `True` | Always keep the reasoning, even if the template would strip it |
+| `False` | Always drop the reasoning |
+
+Reasoning on the final assistant message (after the last user message) is always kept, as it is needed for training.
 
 See [examples/notebooks/apply_chat.ipynb](examples/notebooks/apply_chat.ipynb) for interactive examples.
 
@@ -125,6 +144,9 @@ Handles all four output formats:
 | Truncated prefixed | `reasoning...` (detected automatically for prefixed models) |
 
 Recognises tag variants: `think`, `thinking`, `reasoning`, `thought` (case-insensitive).
+
+Pass the generation prompt as `prompt=` so `parse` knows whether the output continues inside an open reasoning block — for example, Qwen3.5 opens `<think>` by default, but closes it in the prompt when called with `enable_thinking=False`.
+For prefixed templates, output with no closing tag is classed as truncated, whether generation hit the token limit or the model stopped early.
 
 See [examples/notebooks/parse_and_stats.ipynb](examples/notebooks/parse_and_stats.ipynb) for interactive examples.
 
@@ -161,6 +183,9 @@ s.answer_rate               # float — fraction with a non-blank answer
 | **MR** | `missing_reasoning_rate` | Fraction with no reasoning block at all |
 | **pass@1** | accuracy on first sample | Standard answer correctness |
 | **Rpass@1** | accuracy among VR=True samples | Accuracy conditioned on valid reasoning |
+
+For nested `[task][sample]` input, all rates are macro-averaged across tasks (tasks with no samples are excluded).
+Rpass@1 is averaged only over tasks with at least one valid-reasoning sample, since it is undefined for the rest.
 
 Reasoning collapse is observable as VR → 0 over training steps or data size.
 

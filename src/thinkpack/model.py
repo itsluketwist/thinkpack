@@ -5,7 +5,7 @@ import logging
 import re
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
+from typing import Any, Protocol
 
 
 _logger = logging.getLogger(__name__)
@@ -15,6 +15,13 @@ class _Tokenizer(Protocol):
     """Minimal protocol for a HuggingFace-compatible tokenizer."""
 
     chat_template: str | None
+
+    def __call__(
+        self,
+        text: str,
+        add_special_tokens: bool = ...,
+        return_offsets_mapping: bool = ...,
+    ) -> Any: ...
 
     def apply_chat_template(
         self,
@@ -35,6 +42,23 @@ class _Tokenizer(Protocol):
         self,
         token_ids: list[int],
     ) -> str: ...
+
+
+def _unwrap_tokenizer(tokenizer: _Tokenizer) -> _Tokenizer:
+    """
+    Return the text tokenizer, unwrapping it from a multimodal processor if needed.
+
+    Multimodal models (e.g. Qwen3.5) are often loaded as a processor, for example by
+    AutoProcessor or unsloth. A processor wraps the text tokenizer but has no encode()
+    method, so thinkpack uses the inner tokenizer for everything.
+
+    Returns the tokenizer to use for templating and tokenization.
+    """
+    # a processor has no encode() method but exposes the text tokenizer as .tokenizer
+    inner = getattr(tokenizer, "tokenizer", None)
+    if not hasattr(tokenizer, "encode") and inner is not None:
+        return inner
+    return tokenizer
 
 
 class TagStyle(StrEnum):
@@ -67,8 +91,13 @@ class ModelInfo:
     # controls whether tags are formatted as <tag>...</tag> or [tag]...[/tag]
     tag_style: TagStyle = TagStyle.HTML
 
-    # true if the template strips think tags from assistant message content when rendering
+    # true if the template strips the reasoning block from the final assistant message
+    # (the one after the last user message) when rendering, e.g. DeepSeek-R1
     strips_think_tags: bool = False
+
+    # true if the template strips the reasoning block from earlier assistant messages
+    # (those before the last user message) when rendering, e.g. Qwen3 and DeepSeek-R1
+    strips_history_think_tags: bool = False
 
     # reserved for future use — always None from automatic detection
     reasoning_key: str | None = None
@@ -134,9 +163,6 @@ class ModelInfo:
         return dataclasses.replace(self, tag_content=tag)
 
 
-# matches a trailing opening tag (html or bracket) — indicates a prefixed template
-_TRAILING_TAG = re.compile(r"(?:<[a-zA-Z][a-zA-Z0-9_]*>|\[[A-Z][A-Z0-9_]*\])\s*$")
-
 # bracket-style is checked first as it is more distinctive than html tags
 _REASONING_TAG_NAMES = ["think", "thinking", "thought", "reasoning"]
 
@@ -148,39 +174,98 @@ _KNOWN_TAGS: list[tuple[str, str, TagStyle]] = [
     *[(f"<{name}>", name, TagStyle.HTML) for name in _REASONING_TAG_NAMES],
 ]
 
+# unique text placed inside a test reasoning block during detection — searching for this
+# (rather than the tag itself) avoids being fooled by tags in a default system prompt
+_DETECTION_MARKER = "thinkpack-detection-marker"
+
+# plain text used to check that the tokenizer can encode and decode without losing
+# information (e.g. spaces), which catches broken tokenizer versions
+_ROUND_TRIP_TEXT = "thinkpack tokenizer check: hello world"
+
 
 # keyed on chat_template string, which fully determines detection
 _cache: dict[str, ModelInfo] = {}
+
+
+def _template_text(tokenizer: _Tokenizer) -> str:
+    """
+    Return the tokenizer's chat template source as a single string.
+
+    The template may be a string, a dict of named templates (e.g. "default" and
+    "tool_use"), or None. A dict is joined into one string so it can be searched for
+    reasoning tags and used as a cache key.
+
+    Returns the template source, or an empty string if there is no template.
+    """
+    template = getattr(tokenizer, "chat_template", None)
+    if template is None:
+        return ""
+    if isinstance(template, dict):
+        # join all named templates so tag scanning sees every variant
+        return "\n".join(str(t) for t in template.values())
+    return str(template)
+
+
+def _render(
+    tokenizer: _Tokenizer,
+    conversation: list[dict[str, str]],
+    add_generation_prompt: bool,
+) -> str:
+    """
+    Render a conversation with the tokenizer's chat template, without tokenizing.
+
+    Returns the rendered template string.
+    """
+    rendered: str | list[int] = tokenizer.apply_chat_template(
+        conversation,
+        tokenize=False,
+        add_generation_prompt=add_generation_prompt,
+    )
+    if isinstance(rendered, list):
+        # some tokenizers return token ids despite tokenize=False
+        rendered = tokenizer.decode(rendered)
+    return rendered
+
+
+def _check_round_trip(tokenizer: _Tokenizer) -> None:
+    """
+    Warn if the tokenizer cannot encode and decode plain text without changing it.
+
+    Some transformers versions (5.3 to 5.12) load certain byte-level tokenizers, such
+    as DeepSeek-R1-Distill-Llama, with the wrong pre-tokenizer. Spaces are then
+    silently dropped, so every token id is wrong. This check only logs a warning.
+    """
+    token_ids = tokenizer.encode(_ROUND_TRIP_TEXT, add_special_tokens=False)
+    decoded = tokenizer.decode(token_ids)
+    if decoded.strip() != _ROUND_TRIP_TEXT:
+        _logger.warning(
+            "Tokenizer %s does not round-trip plain text (%r was decoded as %r), so its "
+            "token ids are likely wrong. This is a known bug in transformers 5.3 to 5.12 "
+            "for some byte-level models (e.g. DeepSeek-R1-Distill) — upgrade transformers. "
+            "See https://github.com/huggingface/transformers/issues/45488.",
+            type(tokenizer).__name__,
+            _ROUND_TRIP_TEXT,
+            decoded,
+        )
 
 
 def detect_model(tokenizer: _Tokenizer) -> ModelInfo:
     """
     Detect how a tokenizer handles reasoning blocks from its chat template.
 
-    Inspects the template in three steps (see inline comments): prefixed detection,
-    tag name detection, and strips_think_tags detection. Results are cached on the
-    template string so repeated calls are free.
+    Inspects the template in four steps (see inline comments): tag name detection,
+    prefixed detection, and whether reasoning is stripped from the final and earlier
+    assistant messages. Also checks the tokenizer round-trips plain text. Results are
+    cached on the template string so repeated calls are free.
 
     Returns a ModelInfo with the detected properties.
     """
-    template = tokenizer.chat_template or ""
+    tokenizer = _unwrap_tokenizer(tokenizer)
+    template = _template_text(tokenizer)
     if cached := _cache.get(template):
         return cached
 
-    # step 1: detect prefixed by checking if the generation prompt ends with an
-    # opening reasoning tag — both html and bracket forms are checked
-    gen_prompt: str | list[int] = tokenizer.apply_chat_template(
-        [{"role": "user", "content": "hello"}],
-        tokenize=False,
-        add_generation_prompt=True,
-    )
-    if isinstance(gen_prompt, list):
-        # some tokenizers return token ids despite tokenize=False
-        gen_prompt = tokenizer.decode(gen_prompt)
-
-    prefixed = bool(_TRAILING_TAG.search(gen_prompt))
-
-    # step 2: detect the reasoning tag by scanning the template source string
+    # step 1: detect the reasoning tag by scanning the template source string
     # for known tag patterns — defaults to <think> if nothing matches
     tag_content = "think"
     tag_style = TagStyle.HTML
@@ -192,36 +277,68 @@ def detect_model(tokenizer: _Tokenizer) -> ModelInfo:
     else:
         _logger.warning(
             "No known reasoning tag found in the chat template — "
-            "defaulting to <think>. Use the tag= argument to override if needed."
+            "defaulting to <think>. Use the override_tag= argument to override if needed."
         )
 
-    # step 3: detect whether the template strips think tags from assistant content
-    # by rendering a test message with think tags embedded and checking if they survive
-    if tag_style == TagStyle.BRACKET:
-        open_tag = f"[{tag_content}]"
-        close_tag = f"[/{tag_content}]"
-    else:
-        open_tag = f"<{tag_content}>"
-        close_tag = f"</{tag_content}>"
+    # provisional info, so the open and close tag strings come from one place
+    tags = ModelInfo(
+        prefixed=False,
+        tag_content=tag_content,
+        tag_style=tag_style,
+    )
 
-    test_content = f"{open_tag}\ntest reasoning\n{close_tag}\ntest response"
-    test_rendered: str | list[int] = tokenizer.apply_chat_template(
-        [
+    # step 2: detect prefixed by checking if the generation prompt ends with the
+    # opening reasoning tag (trailing whitespace such as "\n" is ignored)
+    gen_prompt = _render(
+        tokenizer=tokenizer,
+        conversation=[{"role": "user", "content": "hello"}],
+        add_generation_prompt=True,
+    )
+    prefixed = gen_prompt.rstrip().endswith(tags.open_tag)
+
+    # a test assistant message whose reasoning block contains a unique marker
+    test_assistant = {
+        "role": "assistant",
+        "content": (
+            f"{tags.open_tag}\n{_DETECTION_MARKER}\n{tags.close_tag}\ntest response"
+        ),
+    }
+
+    # step 3: detect whether the template strips reasoning from the final assistant
+    # message, by rendering it and checking whether the marker survives
+    final_rendered = _render(
+        tokenizer=tokenizer,
+        conversation=[
             {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": test_content},
+            test_assistant,
         ],
-        tokenize=False,
         add_generation_prompt=False,
     )
-    if isinstance(test_rendered, list):
-        test_rendered = tokenizer.decode(test_rendered)
-    strips_think_tags = open_tag not in test_rendered
+    strips_think_tags = _DETECTION_MARKER not in final_rendered
+
+    # step 4: detect whether the template strips reasoning from earlier assistant
+    # messages, by adding a later user message so the test message becomes history
+    history_rendered = _render(
+        tokenizer=tokenizer,
+        conversation=[
+            {"role": "user", "content": "hello"},
+            test_assistant,
+            {"role": "user", "content": "hello again"},
+        ],
+        add_generation_prompt=False,
+    )
+    strips_history_think_tags = _DETECTION_MARKER not in history_rendered
+
+    # finally, warn if the tokenizer itself is broken (not cached separately, as
+    # detection only runs once per template)
+    _check_round_trip(tokenizer=tokenizer)
 
     result = ModelInfo(
         prefixed=prefixed,
-        strips_think_tags=strips_think_tags,
         tag_content=tag_content,
         tag_style=tag_style,
+        strips_think_tags=strips_think_tags,
+        strips_history_think_tags=strips_history_think_tags,
     )
     _cache[template] = result
     return result

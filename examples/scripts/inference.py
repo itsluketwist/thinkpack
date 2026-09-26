@@ -24,8 +24,8 @@ conversations = [
 
 # --- apply chat template ---
 # apply_chat_templates handles template detection automatically.
-# think_prefix=None (default) leaves thought seeding to the model; add_generation_reasoning=True
-# (default) ensures the <think> tag is open before generation starts.
+# think_prefix=None (default) leaves thought seeding to the model; add_generation_reasoning=None
+# (default) leaves the template output unchanged — pass True to ensure the <think> tag is open.
 prompts = thinkpack.apply_chat_templates(
     conversations=conversations,
     tokenizer=tokenizer,

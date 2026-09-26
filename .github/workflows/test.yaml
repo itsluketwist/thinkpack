@@ -24,7 +24,7 @@ jobs:
     steps:
 
       - name: 1. Checkout the code...
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: 2. Configure Python version ${{ matrix.python-version }}...
         uses: astral-sh/setup-uv@v6
@@ -33,3 +33,25 @@ jobs:
 
       - name: 3. Run the tests...
         run: uv run --group dev pytest
+
+  # testing against the newest dependency versions (ignoring the lock file), so that
+  # breaking changes in transformers or tokenizers are caught before users hit them
+  test-latest:
+
+    runs-on: ubuntu-latest
+
+    environment:
+      name: test
+
+    steps:
+
+      - name: 1. Checkout the code...
+        uses: actions/checkout@v4
+
+      - name: 2. Configure Python version 3.13...
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+
+      - name: 3. Run the tests with the latest dependencies...
+        run: uv run --group dev --upgrade pytest

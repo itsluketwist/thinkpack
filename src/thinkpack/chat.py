@@ -1,6 +1,6 @@
 """Inference-time chat templating with thought-steering and response prefix injection."""
 
-from thinkpack.model import ModelInfo, _Tokenizer, get_model_info
+from thinkpack.model import ModelInfo, _Tokenizer, _unwrap_tokenizer, get_model_info
 
 
 def _inject_prefixes(
@@ -78,6 +78,7 @@ _THINK_SENTINEL = "___THINK_INJECT_{idx}___"
 def _prepare_messages(
     messages: list[dict[str, str]],
     model_info: ModelInfo,
+    add_history_reasoning: bool | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, str]]:
     """
     Embed reasoning into assistant messages as literal tags prepended to content.
@@ -86,16 +87,27 @@ def _prepare_messages(
     unchanged; if present and blank, an empty think block is prepended; if present
     and non-blank, a complete block wrapping the reasoning text is prepended.
 
-    For models whose template strips think blocks from history (strips_think_tags=True),
-    reasoning is always preserved in the final output: a sentinel placeholder replaces the
-    assistant content during template rendering, and the think+content block is recorded
-    for post-processing substitution after the template runs.
+    Messages before the last user message are "history". Some templates (e.g. Qwen3)
+    strip reasoning from history, so add_history_reasoning controls these messages:
+      - None  : embed the tags and let the template decide what to keep.
+      - True  : always keep the reasoning, even if the template would strip it.
+      - False : always drop the reasoning.
+    Messages after the last user message (the final assistant turn) always keep their
+    reasoning, as this is required for training.
+
+    Where the template would strip a block that should be kept, a sentinel placeholder
+    replaces the assistant content during template rendering, and the think+content
+    block is recorded for substitution after the template runs.
 
     Returns (prepared_messages, sentinel_map) where sentinel_map maps each sentinel string
     to its think+content replacement. Empty when no sentinels are needed.
     """
     prepared = []
     sentinel_map: dict[str, str] = {}
+
+    # find the last user message — assistant messages before it are history
+    user_indices = [i for i, m in enumerate(messages) if m.get("role") == "user"]
+    last_user_idx = user_indices[-1] if user_indices else -1
 
     for idx, m in enumerate(messages):
         if "reasoning" not in m:
@@ -106,28 +118,41 @@ def _prepare_messages(
         reasoning = m["reasoning"]
         base = {k: v for k, v in m.items() if k != "reasoning"}
         content = base.get("content", "")
+        is_history = idx < last_user_idx
 
-        if model_info.strips_think_tags:
+        if is_history and add_history_reasoning is False:
+            # reasoning is forced out of history, so drop it and keep only the content
+            prepared.append(base)
+            continue
+
+        # decide whether the template would strip this block when we want to keep it
+        if is_history:
+            # history reasoning is only forced back in when explicitly requested
+            use_sentinel = (
+                add_history_reasoning is True and model_info.strips_history_think_tags
+            )
+        else:
+            # the final assistant turn always keeps its reasoning
+            use_sentinel = model_info.strips_think_tags
+
+        if reasoning:
+            # non-blank reasoning: wrap in open/close tags
+            think_block = (
+                f"{model_info.open_tag}\n{reasoning}\n{model_info.close_tag}\n"
+            )
+        else:
+            # blank reasoning key: produce an empty think block
+            think_block = f"{model_info.open_tag}\n{model_info.close_tag}\n"
+
+        if use_sentinel:
             # template would strip the think block, so use a sentinel instead;
             # the real think+content is recorded and re-injected after rendering
             sentinel = _THINK_SENTINEL.format(idx=idx)
-            if reasoning:
-                sentinel_map[sentinel] = (
-                    f"{model_info.open_tag}\n{reasoning}\n{model_info.close_tag}\n{content}"
-                )
-            else:
-                sentinel_map[sentinel] = (
-                    f"{model_info.open_tag}\n{model_info.close_tag}\n{content}"
-                )
+            sentinel_map[sentinel] = think_block + content
             prepared.append({**base, "content": sentinel})
         else:
-            if reasoning:
-                # non-blank reasoning: wrap in open/close tags
-                tagged = f"{model_info.open_tag}\n{reasoning}\n{model_info.close_tag}\n"
-            else:
-                # blank reasoning key: produce an empty think block
-                tagged = f"{model_info.open_tag}\n{model_info.close_tag}\n"
-            prepared.append({**base, "content": tagged + content})
+            # embed the tags directly in the content
+            prepared.append({**base, "content": think_block + content})
 
     return prepared, sentinel_map
 
@@ -139,6 +164,7 @@ def apply_chat_template(
     response_prefix: str | None = None,
     override_tag: str | None = None,
     add_generation_reasoning: bool | None = None,
+    add_history_reasoning: bool | None = None,
     add_generation_prompt: bool | None = None,
     **kwargs: object,
 ) -> str:
@@ -158,6 +184,12 @@ def apply_chat_template(
       - None  : leave the template output unchanged (default).
       - True  : ensure the open tag is present, adding it for non-prefixed models.
       - False : strip the open tag if a prefixed template injected one.
+
+    add_history_reasoning controls reasoning on assistant messages before the last user
+    message, which some templates (e.g. Qwen3) strip:
+      - None  : leave it to the template (default).
+      - True  : always keep the reasoning, even if the template would strip it.
+      - False : always drop the reasoning.
 
     think_prefix seeds the model's reasoning inside the open block.
     response_prefix seeds the response after the block closes.
@@ -184,6 +216,9 @@ def apply_chat_template(
             "add_generation_prompt=True"
         )
 
+    # multimodal processors wrap the text tokenizer — use the tokenizer directly
+    tokenizer = _unwrap_tokenizer(tokenizer)
+
     model_info = get_model_info(
         tokenizer=tokenizer,
         override_tag=override_tag,
@@ -191,6 +226,7 @@ def apply_chat_template(
     prepared, sentinel_map = _prepare_messages(
         messages=conversation,
         model_info=model_info,
+        add_history_reasoning=add_history_reasoning,
     )
 
     # only forward add_generation_prompt when explicitly set; None defers to the tokenizer
@@ -245,6 +281,7 @@ def apply_chat_templates(
     response_prefix: str | list[str] | None = None,
     override_tag: str | None = None,
     add_generation_reasoning: bool | None = None,
+    add_history_reasoning: bool | None = None,
     add_generation_prompt: bool | None = None,
     **kwargs: object,
 ) -> list[str]:
@@ -277,6 +314,7 @@ def apply_chat_templates(
             response_prefix=response_prefixes[i],
             override_tag=override_tag,
             add_generation_reasoning=add_generation_reasoning,
+            add_history_reasoning=add_history_reasoning,
             add_generation_prompt=add_generation_prompt,
             **kwargs,
         )

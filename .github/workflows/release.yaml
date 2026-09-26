@@ -18,12 +18,12 @@ jobs:
     steps:
 
       - name: 1. Checkout the code...
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: 2. Configure Python...
-        uses: actions/setup-python@v3
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
           architecture: x64
 
       - name: 3. Bundle llms.txt into package data

@@ -1,5 +1,8 @@
 """Tests for thinkpack.mask — training-time loss masking for reasoning blocks."""
 
+import logging
+from typing import Any, cast
+
 import pytest
 
 from thinkpack.mask import MaskType, apply_mask
@@ -133,13 +136,10 @@ class TestMaskThink:
         )
         row = ds[0]
 
-        # LlamaTokenizer (SentencePiece) drops spaces when decoding a token subset,
-        # so check individual words rather than full phrases
         masked_text = _decode_masked(deepseek_r1_llama_tokenizer, row)
-        assert "detailed" in masked_text
-        assert "reasoning" in masked_text
+        assert "detailed reasoning here" in masked_text
         unmasked_text = _decode_unmasked(deepseek_r1_llama_tokenizer, row)
-        assert "final" in unmasked_text
+        assert "final answer" in unmasked_text
         assert "detailed" not in unmasked_text
 
     def test_native_key_model_masks_reasoning_correctly(
@@ -299,3 +299,247 @@ class TestMaskMiscellaneous:
         )
         assert any(v == -999 for v in ds[0]["labels"])
         assert -100 not in ds[0]["labels"]
+
+
+# ---------------------------------------------------------------------------
+# regression tests — boundary location across all supported models
+# ---------------------------------------------------------------------------
+
+
+_ALL_MODELS = [
+    "qwen3_tokenizer",
+    "qwen35_tokenizer",
+    "deepseek_r1_llama_tokenizer",
+    "olmo3_tokenizer",
+    "ministral_tokenizer",
+]
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("fixture_name", _ALL_MODELS)
+class TestMaskBoundaries:
+    """The final reasoning block and response are located correctly for every model."""
+
+    @pytest.mark.parametrize(
+        "response",
+        [
+            "final answer",
+            # templates such as qwen3.5 trim content, so the response text changes
+            "final answer with a trailing newline\n",
+            "\n\nfinal answer with leading newlines",
+            # short responses can also appear inside special tokens like <|im_end|>
+            "d",
+            "e",
+        ],
+    )
+    def test_only_response_trained(
+        self,
+        request: pytest.FixtureRequest,
+        fixture_name: str,
+        response: str,
+    ) -> None:
+        """PROMPT | THINK masking: the trained tokens are exactly the response (+ end tokens)."""
+        tokenizer = request.getfixturevalue(fixture_name)
+
+        ds = apply_mask(
+            conversations=[_conversation(response=response)],
+            tokenizer=tokenizer,
+            masked=MaskType.PROMPT | MaskType.THINK,
+        )
+        row = ds[0]
+
+        assert _decode_unmasked(tokenizer, row).lstrip().startswith(response.strip())
+        assert "detailed reasoning here" in _decode_masked(tokenizer, row)
+        assert "test question" in _decode_masked(tokenizer, row)
+
+    def test_single_think_block(
+        self,
+        request: pytest.FixtureRequest,
+        fixture_name: str,
+    ) -> None:
+        """The reasoning appears exactly once in the training sequence (no duplicate blocks)."""
+        tokenizer = request.getfixturevalue(fixture_name)
+
+        for masked in [MaskType.THINK, None]:
+            ds = apply_mask(
+                conversations=[_conversation()],
+                tokenizer=tokenizer,
+                masked=masked,
+            )
+            full_text = tokenizer.decode(ds[0]["input_ids"])
+            assert full_text.count("detailed reasoning here") == 1
+
+    def test_empty_reasoning_single_block_unmasked(
+        self,
+        request: pytest.FixtureRequest,
+        fixture_name: str,
+    ) -> None:
+        """reasoning='' with masked=None (the "empty" strategy) adds exactly one empty block."""
+        tokenizer = request.getfixturevalue(fixture_name)
+        open_tag = "[THINK]" if fixture_name == "ministral_tokenizer" else "<think>"
+
+        ds = apply_mask(
+            conversations=[_conversation(reasoning="")],
+            tokenizer=tokenizer,
+            masked=None,
+        )
+        full_text = tokenizer.decode(ds[0]["input_ids"])
+
+        # count only tags in the assistant turn (ministral's system prompt has its own)
+        assistant_text = full_text[full_text.rfind("test question") :]
+        assert assistant_text.count(open_tag) == 1
+
+    def test_history_block_not_masked_as_final(
+        self,
+        request: pytest.FixtureRequest,
+        fixture_name: str,
+    ) -> None:
+        """Reasoning in an earlier turn does not move the THINK boundary of the final turn."""
+        tokenizer = request.getfixturevalue(fixture_name)
+        conversation = [
+            {"role": "user", "content": "first question"},
+            {
+                "role": "assistant",
+                "content": "first answer",
+                "reasoning": "old thoughts",
+            },
+            {"role": "user", "content": "second question"},
+            # no reasoning key on the final turn — an empty block is injected
+            {"role": "assistant", "content": "second answer"},
+        ]
+
+        ds = apply_mask(
+            conversations=[conversation],
+            tokenizer=tokenizer,
+            masked=MaskType.THINK,
+            add_history_reasoning=True,
+        )
+        unmasked = _decode_unmasked(tokenizer, ds[0])
+
+        # everything outside the final (empty) think block is trained on
+        assert "old thoughts" in unmasked
+        assert "second question" in unmasked
+        assert "second answer" in unmasked
+
+
+@pytest.mark.slow
+class TestMaskSystemPrompts:
+    """Reasoning tags inside a system prompt do not affect masking."""
+
+    def test_system_prompt_mentioning_think_tag(self, qwen3_tokenizer) -> None:
+        """THINK masking leaves a system prompt that mentions <think> trainable."""
+        conversation = [
+            {"role": "system", "content": "Put your reasoning inside <think> tags."},
+            *_conversation(),
+        ]
+
+        ds = apply_mask(
+            conversations=[conversation],
+            tokenizer=qwen3_tokenizer,
+            masked=MaskType.THINK,
+        )
+        unmasked = _decode_unmasked(qwen3_tokenizer, ds[0])
+
+        assert "Put your reasoning inside <think> tags." in unmasked
+        assert "test question" in unmasked
+        assert "detailed reasoning here" not in unmasked
+
+    def test_ministral_default_system_prompt_think(self, ministral_tokenizer) -> None:
+        """Ministral's default system prompt contains [THINK]; the instruction stays trained."""
+        ds = apply_mask(
+            conversations=[_conversation()],
+            tokenizer=ministral_tokenizer,
+            masked=MaskType.THINK,
+        )
+        unmasked = _decode_unmasked(ministral_tokenizer, ds[0])
+
+        assert "test question" in unmasked
+        assert "final answer" in unmasked
+        assert "detailed reasoning here" not in unmasked
+
+    def test_ministral_prompt_mask_covers_instruction(
+        self, ministral_tokenizer
+    ) -> None:
+        """PROMPT masking on Ministral masks the instruction, not just the system prompt."""
+        ds = apply_mask(
+            conversations=[_conversation()],
+            tokenizer=ministral_tokenizer,
+            masked=MaskType.PROMPT,
+        )
+        row = ds[0]
+
+        assert "test question" in _decode_masked(ministral_tokenizer, row)
+        assert "detailed reasoning here" in _decode_unmasked(ministral_tokenizer, row)
+        assert "final answer" in _decode_unmasked(ministral_tokenizer, row)
+
+
+@pytest.mark.slow
+class TestMaskValidation:
+    """Invalid inputs fail loudly, and silent data loss is reported."""
+
+    def test_last_message_must_be_assistant(self, qwen3_tokenizer) -> None:
+        """A conversation that does not end with an assistant message raises ValueError."""
+        with pytest.raises(ValueError, match="Conversation 0"):
+            apply_mask(
+                conversations=[[{"role": "user", "content": "q"}]],
+                tokenizer=qwen3_tokenizer,
+            )
+
+    def test_truncation_warning(
+        self,
+        qwen3_tokenizer,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Truncating a conversation logs a warning, as does leaving no trainable tokens."""
+        with caplog.at_level(logging.WARNING, logger="thinkpack"):
+            apply_mask(
+                conversations=[_conversation()],
+                tokenizer=qwen3_tokenizer,
+                masked=MaskType.PROMPT | MaskType.THINK,
+                max_seq_length=5,
+            )
+
+        assert "were truncated" in caplog.text
+        assert "no trainable tokens" in caplog.text
+
+    def test_no_warning_without_truncation(
+        self,
+        qwen3_tokenizer,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A short conversation produces no warnings."""
+        with caplog.at_level(logging.WARNING, logger="thinkpack"):
+            apply_mask(
+                conversations=[_conversation()],
+                tokenizer=qwen3_tokenizer,
+            )
+
+        assert caplog.text == ""
+
+
+class _ProcessorStub:
+    """Mimics a multimodal processor: wraps a tokenizer but has no encode() method."""
+
+    def __init__(self, tokenizer: Any) -> None:
+        self.tokenizer = tokenizer
+
+
+@pytest.mark.slow
+class TestMaskProcessor:
+    """Multimodal processors (e.g. Qwen3.5 loaded via AutoProcessor) are unwrapped."""
+
+    def test_processor_matches_tokenizer(self, qwen35_tokenizer) -> None:
+        """Passing a processor gives the same dataset as passing its tokenizer."""
+        # typed as Any, since the stub only implements part of the tokenizer protocol
+        processor = cast(Any, _ProcessorStub(qwen35_tokenizer))
+
+        from_processor = apply_mask(
+            conversations=[_conversation()],
+            tokenizer=processor,
+        )
+        from_tokenizer = apply_mask(
+            conversations=[_conversation()],
+            tokenizer=qwen35_tokenizer,
+        )
+
+        assert from_processor[0] == from_tokenizer[0]

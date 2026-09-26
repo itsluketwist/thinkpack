@@ -312,3 +312,33 @@ class TestTokenAggregation:
 
         # macro-avg: (10.0 + 30.0) / 2 = 20.0
         assert result.avg_reasoning_tokens == pytest.approx(20.0)
+
+
+class TestStatsEmptyTasks:
+    """Tasks with no samples have undefined rates and are excluded from macro-averages."""
+
+    def test_empty_task_excluded_from_average(self) -> None:
+        """An empty task does not pull the macro-averaged rates towards zero."""
+        s = compute_stats(responses=[[_valid(), _valid()], []])
+
+        assert s.total == 2
+        assert s.valid_reasoning_rate == pytest.approx(1.0)
+        assert s.answer_rate == pytest.approx(1.0)
+
+    def test_empty_task_excluded_from_pass_rates(self) -> None:
+        """An empty task does not affect pass@1 either."""
+        s = compute_stats(
+            responses=[[_valid(), _plain()], []],
+            results=[[True, False], []],
+        )
+
+        assert s.pass_at_1 == pytest.approx(0.5)
+        assert s.rpass_at_1 == pytest.approx(1.0)
+
+    def test_all_tasks_empty(self) -> None:
+        """All-empty nested input returns zero totals and rates."""
+        s = compute_stats(responses=[[], []])
+
+        assert s.total == 0
+        assert s.valid_reasoning_rate == 0.0
+        assert s.pass_at_1 is None

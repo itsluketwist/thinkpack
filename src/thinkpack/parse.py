@@ -4,7 +4,7 @@ import dataclasses
 from dataclasses import dataclass
 from typing import cast, overload
 
-from thinkpack.model import ModelInfo, _Tokenizer, get_model_info
+from thinkpack.model import ModelInfo, _Tokenizer, _unwrap_tokenizer, get_model_info
 
 
 @dataclass
@@ -54,6 +54,31 @@ class ParsedResponse:
         return bool(self.answer.strip())
 
 
+def _prompt_leaves_block_open(
+    prompt: str,
+    model_info: ModelInfo,
+) -> bool:
+    """
+    Check whether a generation prompt ends inside an open reasoning block.
+
+    This is true when the last opening tag in the prompt comes after the last closing
+    tag, e.g. a prompt ending "<think>\n" or "<think>\nLet me think". It is false when
+    the prompt has no tags, or ends with a closed block such as "<think>\n\n</think>"
+    (Qwen3/Qwen3.5 with enable_thinking=False). Tags earlier in the prompt, e.g. in a
+    system prompt, are handled correctly because only the last of each is compared.
+
+    Returns True if the model's output will continue inside the reasoning block.
+    """
+    open_re, close_re = model_info.tag_regex
+    open_matches = list(open_re.finditer(prompt))
+    close_matches = list(close_re.finditer(prompt))
+    if not open_matches:
+        return False
+    if not close_matches:
+        return True
+    return open_matches[-1].start() > close_matches[-1].start()
+
+
 def _parse_single(
     response: str,
     model_info: ModelInfo,
@@ -85,7 +110,7 @@ def _parse_single(
         # model started reasoning but output was cut off before the close tag
         result = ParsedResponse(
             answer="",
-            reasoning=response[open_match.end() :],
+            reasoning=response[open_match.end() :].strip(),
             reasoning_tag=model_info.tag_content,
             has_valid_reasoning=False,
             has_truncated_reasoning=True,
@@ -185,39 +210,57 @@ def parse(
     truncated standard (<think>content...), and truncated prefixed (content...) formats.
 
     Pass tokenizer to auto-detect model_info; override_tag overrides the detected tag.
-    Pass model_info directly to skip detection (e.g. when reusing across a batch).
-    At least one of tokenizer or model_info must be provided.
+    Pass model_info directly to skip detection (e.g. when reusing across a batch) — an
+    explicit model_info always takes precedence, and the tokenizer is then only used for
+    token counts. At least one of tokenizer or model_info must be provided.
 
     add_generation_reasoning mirrors apply_chat_template's parameter: True/False overrides
     model_info.prefixed; None defers to prompt-based detection.
 
     prompt is the generation prompt(s). When provided and add_generation_reasoning is None,
-    the first prompt is checked: if it ends with the open tag the model is treated as prefixed.
+    the first prompt is checked: the model is treated as prefixed if the prompt ends inside
+    an open reasoning block (e.g. "<think>" or a think_prefix), and as not prefixed
+    otherwise (e.g. no tags, or a closed "<think></think>" block from enable_thinking=False).
 
     Token counts are populated when calculate_tokens=True and a tokenizer is provided.
 
     Returns a ParsedResponse, list[ParsedResponse], or list[list[ParsedResponse]]
     matching the shape of the input.
     """
+    # multimodal processors wrap the text tokenizer — use the tokenizer directly
     if tokenizer is not None:
+        tokenizer = _unwrap_tokenizer(tokenizer)
+
+    if model_info is not None:
+        # an explicit model_info takes precedence over detection from the tokenizer
+        if override_tag is not None:
+            model_info = model_info.with_tag(override_tag)
+    elif tokenizer is not None:
         model_info = get_model_info(tokenizer=tokenizer, override_tag=override_tag)
-    elif model_info is None:
+    else:
         raise ValueError("One of tokenizer or model_info must be provided.")
 
     # mirror apply_chat_template: True/False overrides detected prefixed state;
     # None falls through to prompt-based detection
-    if add_generation_reasoning is True and not model_info.prefixed:
-        model_info = dataclasses.replace(model_info, prefixed=True)
-    elif add_generation_reasoning is False and model_info.prefixed:
-        model_info = dataclasses.replace(model_info, prefixed=False)
-    elif prompt is not None and not model_info.prefixed:
+    if add_generation_reasoning is not None:
+        model_info = dataclasses.replace(
+            model_info,
+            prefixed=add_generation_reasoning,
+        )
+    elif prompt is not None:
         # check the first prompt as representative — all prompts in a batch use the
         # same add_generation_reasoning setting
         _sample: str | None = (
             prompt if isinstance(prompt, str) else (prompt[0] if prompt else None)
         )
-        if _sample and _sample.rstrip("\n").endswith(model_info.open_tag):
-            model_info = dataclasses.replace(model_info, prefixed=True)
+        if _sample:
+            model_info = dataclasses.replace(
+                model_info,
+                prefixed=_prompt_leaves_block_open(
+                    prompt=_sample,
+                    model_info=model_info,
+                ),
+            )
 
     if isinstance(response, str):
         return _parse_single(

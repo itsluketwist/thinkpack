@@ -1,14 +1,15 @@
 """Tests for thinkpack.parse — response parsing into reasoning and answer.
 
 Non-slow tests use explicit ModelInfo instances to avoid needing a tokenizer.
-Slow tests use real tokenizers for Qwen3 (non-prefixed, <think>), OLMo-3
-(prefixed, <think>), and Ministral (non-prefixed, [THINK]).
+Slow tests use real tokenizers for Qwen3 (non-prefixed, <think>), Qwen3.5
+(prefixed, <think>), OLMo-3 (prefixed, <think>), and Ministral (non-prefixed, [THINK]).
 
 Skip slow tests with: pytest --no-slow
 """
 
 import pytest
 
+from thinkpack.chat import apply_chat_template
 from thinkpack.model import ModelInfo, TagStyle, detect_model
 from thinkpack.parse import ParsedResponse, parse
 
@@ -905,3 +906,132 @@ class TestMinistralParse:
         assert result.reasoning_token_count > 0
         assert result.answer_token_count is not None
         assert result.answer_token_count > 0
+
+
+# ---------------------------------------------------------------------------
+# regression tests — prompt detection in both directions, model_info precedence
+# ---------------------------------------------------------------------------
+
+
+class TestParsePromptDetection:
+    """The prompt decides whether output continues inside an open reasoning block."""
+
+    def test_closed_block_prompt_unprefixes_prefixed_model(self) -> None:
+        """A prompt ending in a closed block (enable_thinking=False) is not prefixed."""
+        result = parse(
+            response="just an answer",
+            model_info=_THINK_PREFIXED,
+            prompt="<|im_start|>assistant\n<think>\n\n</think>\n\n",
+        )
+
+        assert result.has_missing_reasoning is True
+        assert result.answer == "just an answer"
+        assert result.reasoning == ""
+
+    def test_think_prefix_prompt_is_prefixed(self) -> None:
+        """A prompt ending with an open block plus a think_prefix is still prefixed."""
+        result = parse(
+            response="more reasoning that was cut off",
+            model_info=_THINK,
+            prompt="some prompt\n<think>\nLet me think step by step.",
+        )
+
+        assert result.has_truncated_reasoning is True
+        assert result.answer == ""
+
+    def test_response_prefix_prompt_is_not_prefixed(self) -> None:
+        """A prompt whose block was closed by a response_prefix is not prefixed."""
+        result = parse(
+            response="the rest of the answer",
+            model_info=_THINK_PREFIXED,
+            prompt="some prompt\n<think>\n</think>\nThe answer is",
+        )
+
+        assert result.has_missing_reasoning is True
+        assert result.answer == "the rest of the answer"
+
+    def test_tags_in_system_prompt_ignored(self) -> None:
+        """Tags in an earlier system prompt do not make the prompt prefixed."""
+        result = parse(
+            response="just an answer",
+            model_info=_BRACKET_THINK,
+            prompt="[SYSTEM_PROMPT]use [THINK]...[/THINK][/SYSTEM_PROMPT][INST]q[/INST]",
+        )
+
+        assert result.has_missing_reasoning is True
+
+
+class TestParseModelInfoPrecedence:
+    """An explicit model_info is always used, even when a tokenizer is also passed."""
+
+    def test_override_tag_applies_to_model_info(self) -> None:
+        """override_tag is applied to an explicit model_info."""
+        result = parse(
+            response="<reasoning>r</reasoning>a",
+            model_info=_THINK,
+            override_tag="reasoning",
+        )
+
+        assert result.has_valid_reasoning is True
+        assert result.answer == "a"
+
+    def test_truncated_reasoning_is_stripped(self) -> None:
+        """Truncated reasoning is stripped of whitespace, like the other branches."""
+        result = parse(response="<think>\n  started...  \n", model_info=_THINK)
+
+        assert result.has_truncated_reasoning is True
+        assert result.reasoning == "started..."
+
+    @pytest.mark.slow
+    def test_model_info_with_tokenizer(self, qwen3_tokenizer) -> None:
+        """model_info wins over detection; the tokenizer is still used for token counts."""
+        result = parse(
+            response="partial reasoning",
+            tokenizer=qwen3_tokenizer,
+            model_info=_THINK_PREFIXED,
+            calculate_tokens=True,
+        )
+
+        # qwen3 is detected as non-prefixed, so this proves model_info was used
+        assert result.has_truncated_reasoning is True
+        assert result.reasoning_token_count is not None
+        assert result.answer_token_count is not None
+
+
+@pytest.mark.slow
+class TestParseQwen35:
+    """parse() with Qwen/Qwen3.5-9B — prefixed, <think> tags."""
+
+    def test_thinking_mode_truncated(self, qwen35_tokenizer) -> None:
+        """Default thinking mode: tagless output is truncated reasoning (block was opened)."""
+        result = parse(response="reasoning cut off", tokenizer=qwen35_tokenizer)
+
+        assert result.has_truncated_reasoning is True
+
+    def test_thinking_mode_valid(self, qwen35_tokenizer) -> None:
+        """Default thinking mode: reasoning then close tag then answer is valid."""
+        result = parse(
+            response="reasoning\n</think>\n\nthe answer",
+            tokenizer=qwen35_tokenizer,
+        )
+
+        assert result.has_valid_reasoning is True
+        assert result.answer == "the answer"
+
+    def test_non_thinking_mode_with_prompt(self, qwen35_tokenizer) -> None:
+        """enable_thinking=False: passing the prompt extracts the answer correctly."""
+        prompt = apply_chat_template(
+            conversation=[{"role": "user", "content": "hi"}],
+            tokenizer=qwen35_tokenizer,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+
+        result = parse(
+            response="Hello there!",
+            tokenizer=qwen35_tokenizer,
+            prompt=prompt,
+        )
+
+        assert result.answer == "Hello there!"
+        assert result.has_missing_reasoning is True
