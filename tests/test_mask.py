@@ -302,7 +302,7 @@ class TestMaskMiscellaneous:
 
 
 # ---------------------------------------------------------------------------
-# regression tests — boundary location across all supported models
+# boundary location across all supported models
 # ---------------------------------------------------------------------------
 
 

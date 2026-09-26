@@ -1,14 +1,14 @@
 # ***Reasoning-Trace Collapse: Empirical Study Replication Package***
 
 This package reproduces the experiments from the research paper ***"Reasoning-Trace Collapse: Evaluating the Loss of Explicit Reasoning During Fine-Tuning"***.
-It contains the training and evaluation code needed to observe the reasoning collapse phenomenon - where models that reason by default (using `<think>...</think>` blocks) stop reasoning entirely after fine-tuning on standard instruction-response data - and to compare strategies that aim to mitigate it.
+It contains the training and evaluation code needed to observe reasoning-trace collapse — where models that reason by default (using `<think>...</think>` blocks) stop producing valid reasoning after fine-tuning on standard instruction-response data — and to compare strategies that aim to mitigate it.
 
 Two scripts cover the full experimental workflow:
 
 - **`train.py`** — fine-tunes a base model on chemistry QA data using a specified reasoning strategy
-- **`evaluate.py`** — evaluates a model (base or fine-tuned) on a dataset and reports accuracy plus reasoning collapse metrics
+- **`evaluate.py`** — evaluates a model (base or fine-tuned) on a dataset and reports accuracy plus the reasoning-trace collapse metrics
 
-The ThinkPack library ([companion repository](../)) provides utilities to allow model-agnostic reasoning-aware training and evaluation.
+The ThinkPack library ([companion repository](../)) provides the model-agnostic, reasoning-aware training and evaluation utilities.
 
 ---
 
@@ -98,7 +98,8 @@ python train.py --model Qwen/Qwen3-8B --strategy respond --lr 1e-5
 python train.py --model Qwen/Qwen3-8B --strategy empty --lr 1e-5
 ```
 
-Training artefacts (the LoRA adapter) are saved to `output/<model>-<strategy>/adapter/` by default. Pass `--output` to override.
+The final LoRA adapter is saved to `output/<model>-<strategy>/adapter/` by default, with intermediate checkpoints in `checkpoints/step_<N>/` alongside it.
+Pass `--output` to change the directory — for example, to keep runs with different learning rates or seeds apart.
 
 ### *all arguments*
 
@@ -108,8 +109,10 @@ Training artefacts (the LoRA adapter) are saved to `output/<model>-<strategy>/ad
 | `--strategy` | `default` | Reasoning strategy (see table above) |
 | `--lr` | `1e-5` | Learning rate — the primary experimental variable |
 | `--seed` | `42` | Random seed, we use both `42` and `67` in our experiments |
-| `--output` | `output/<model>-<strategy>/` | Directory to save the adapter |
+| `--output` | `output/<model>-<strategy>/` | Directory to save the adapter and checkpoints |
 | `--profile` | `default` | Hyperparameter profile in `config/train.yaml` |
+| `--data` | `data/chemistry_train.jsonl` | Training data JSONL; a `reasoning` field on a record is used as its think block |
+| `--save-steps` | `200` | Save a LoRA checkpoint every N steps (`0` saves only the final adapter) |
 
 ---
 
@@ -138,7 +141,7 @@ python evaluate.py --model Qwen/Qwen3-8B --adapter output/qwen3-8b-mask/adapter 
 |-------|-------------|
 | `pass_at_1` | Fraction of questions answered correctly |
 | `vr` | Valid reasoning rate — fraction of responses with a complete, non-empty `<think>` block |
-| `ir` | Invalid reasoning rate — the collapse indicator; `vr + ir = 1` |
+| `ir` | Invalid reasoning rate — `vr + ir = 1`, and `ir = mr + tr + er` |
 | `mr` | Missing reasoning rate — no `<think>` block at all |
 | `tr` | Truncated reasoning rate — `<think>` opened but never closed (hit max tokens) |
 | `er` | Empty reasoning rate — `<think></think>` present but blank |

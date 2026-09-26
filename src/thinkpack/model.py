@@ -1,4 +1,4 @@
-"""Model template style detection from tokenizer chat templates."""
+"""Detection of how a model formats reasoning blocks, from its tokenizer's chat template."""
 
 import dataclasses
 import logging
@@ -49,8 +49,7 @@ def _unwrap_tokenizer(tokenizer: _Tokenizer) -> _Tokenizer:
     Return the text tokenizer, unwrapping it from a multimodal processor if needed.
 
     Multimodal models (e.g. Qwen3.5) are often loaded as a processor, for example by
-    AutoProcessor or unsloth. A processor wraps the text tokenizer but has no encode()
-    method, so thinkpack uses the inner tokenizer for everything.
+    AutoProcessor or unsloth. A processor wraps the text tokenizer, which is used instead.
 
     Returns the tokenizer to use for templating and tokenization.
     """
@@ -63,9 +62,9 @@ def _unwrap_tokenizer(tokenizer: _Tokenizer) -> _Tokenizer:
 
 class TagStyle(StrEnum):
     """
-    The formatting style used to wrap reasoning block content.
+    The style of tag used to wrap a reasoning block.
 
-    HTML    — standard xml-style tags: <think>...</think>. Used by most models.
+    HTML    — xml-style tags: <think>...</think>. Used by most models.
     BRACKET — bracket-style tags: [THINK]...[/THINK]. Used by some models (e.g. Mistral).
     """
 
@@ -75,11 +74,11 @@ class TagStyle(StrEnum):
 
 @dataclass
 class ModelInfo:
-    """Detected template properties for a model's reasoning block handling.
+    """How a model's chat template handles reasoning blocks.
 
-    Produced by detect_model() and consumed by chat() and mask() to handle
-    model-specific formatting. Use with_tag() to produce a copy with an
-    overridden tag without re-running detection.
+    Returned by detect_model(), and used by apply_chat_template(), parse(), and
+    apply_mask() to handle each model's formatting. Use with_tag() to get a copy
+    with a different reasoning tag.
     """
 
     # true if the template injects the opening reasoning tag into the generation prompt
@@ -99,9 +98,6 @@ class ModelInfo:
     # (those before the last user message) when rendering, e.g. Qwen3 and DeepSeek-R1
     strips_history_think_tags: bool = False
 
-    # reserved for future use — always None from automatic detection
-    reasoning_key: str | None = None
-
     @property
     def open_tag(self) -> str:
         """The opening reasoning tag, e.g. <think> or [THINK]."""
@@ -118,9 +114,9 @@ class ModelInfo:
 
     @property
     def tag_regex(self) -> tuple[re.Pattern[str], re.Pattern[str]]:
-        """The compiled open/close regex patterns for this model's reasoning tags.
+        """Case-insensitive regex patterns matching the opening and closing tags.
 
-        Returns a (open_re, close_re) tuple with a capturing group around the tag name.
+        Returns an (open_re, close_re) tuple, each capturing the tag name.
         """
         escaped = re.escape(self.tag_content)
         if self.tag_style == TagStyle.BRACKET:
@@ -138,10 +134,11 @@ class ModelInfo:
         tag: str,
     ) -> "ModelInfo":
         """
-        Return a copy with tag content and style inferred from the tag string.
+        Return a copy that uses a different reasoning tag.
 
         Accepts a raw tag name ("think"), an HTML tag ("<think>"), or a bracket tag
-        ("[THINK]"). Style is inferred from the format; a raw name keeps the existing style.
+        ("[THINK]"). The tag style is taken from the format; a raw name keeps the
+        current style.
 
         Returns a new ModelInfo with all other fields unchanged.
         """
@@ -163,9 +160,11 @@ class ModelInfo:
         return dataclasses.replace(self, tag_content=tag)
 
 
-# bracket-style is checked first as it is more distinctive than html tags
+# reasoning tag names that detection looks for in a chat template
 _REASONING_TAG_NAMES = ["think", "thinking", "thought", "reasoning"]
 
+# (literal tag, tag name, style) for each known tag, checked in order — bracket tags
+# come first as they are more distinctive than html tags
 _KNOWN_TAGS: list[tuple[str, str, TagStyle]] = [
     *[
         (f"[{name.upper()}]", name.upper(), TagStyle.BRACKET)
@@ -175,15 +174,15 @@ _KNOWN_TAGS: list[tuple[str, str, TagStyle]] = [
 ]
 
 # unique text placed inside a test reasoning block during detection — searching for this
-# (rather than the tag itself) avoids being fooled by tags in a default system prompt
+# rather than the tag itself means tags in a default system prompt are ignored
 _DETECTION_MARKER = "thinkpack-detection-marker"
 
 # plain text used to check that the tokenizer can encode and decode without losing
-# information (e.g. spaces), which catches broken tokenizer versions
+# anything (e.g. spaces)
 _ROUND_TRIP_TEXT = "thinkpack tokenizer check: hello world"
 
 
-# keyed on chat_template string, which fully determines detection
+# detection results, keyed on the chat template text
 _cache: dict[str, ModelInfo] = {}
 
 
@@ -229,11 +228,10 @@ def _render(
 
 def _check_round_trip(tokenizer: _Tokenizer) -> None:
     """
-    Warn if the tokenizer cannot encode and decode plain text without changing it.
+    Log a warning if the tokenizer cannot encode and decode plain text unchanged.
 
-    Some transformers versions (5.3 to 5.12) load certain byte-level tokenizers, such
-    as DeepSeek-R1-Distill-Llama, with the wrong pre-tokenizer. Spaces are then
-    silently dropped, so every token id is wrong. This check only logs a warning.
+    This catches broken tokenizers, such as DeepSeek-R1-Distill-Llama loaded with
+    transformers 5.3 to 5.12, which silently drops spaces and produces wrong token ids.
     """
     token_ids = tokenizer.encode(_ROUND_TRIP_TEXT, add_special_tokens=False)
     decoded = tokenizer.decode(token_ids)
@@ -251,12 +249,12 @@ def _check_round_trip(tokenizer: _Tokenizer) -> None:
 
 def detect_model(tokenizer: _Tokenizer) -> ModelInfo:
     """
-    Detect how a tokenizer handles reasoning blocks from its chat template.
+    Detect how a tokenizer's chat template handles reasoning blocks.
 
-    Inspects the template in four steps (see inline comments): tag name detection,
-    prefixed detection, and whether reasoning is stripped from the final and earlier
-    assistant messages. Also checks the tokenizer round-trips plain text. Results are
-    cached on the template string so repeated calls are free.
+    Finds the reasoning tag, whether the template opens the reasoning block in the
+    generation prompt, and whether it strips reasoning from the final or earlier
+    assistant messages. Also warns if the tokenizer cannot round-trip plain text.
+    Results are cached per chat template, so repeated calls are free.
 
     Returns a ModelInfo with the detected properties.
     """
@@ -265,8 +263,8 @@ def detect_model(tokenizer: _Tokenizer) -> ModelInfo:
     if cached := _cache.get(template):
         return cached
 
-    # step 1: detect the reasoning tag by scanning the template source string
-    # for known tag patterns — defaults to <think> if nothing matches
+    # step 1: find the reasoning tag by searching the template text for known tags,
+    # defaulting to <think> if none are found
     tag_content = "think"
     tag_style = TagStyle.HTML
     for literal, content, style in _KNOWN_TAGS:
@@ -280,7 +278,7 @@ def detect_model(tokenizer: _Tokenizer) -> ModelInfo:
             "defaulting to <think>. Use the override_tag= argument to override if needed."
         )
 
-    # provisional info, so the open and close tag strings come from one place
+    # temporary info, used only to build the open and close tag strings
     tags = ModelInfo(
         prefixed=False,
         tag_content=tag_content,
@@ -329,8 +327,7 @@ def detect_model(tokenizer: _Tokenizer) -> ModelInfo:
     )
     strips_history_think_tags = _DETECTION_MARKER not in history_rendered
 
-    # finally, warn if the tokenizer itself is broken (not cached separately, as
-    # detection only runs once per template)
+    # finally, warn if the tokenizer itself is broken
     _check_round_trip(tokenizer=tokenizer)
 
     result = ModelInfo(
@@ -349,15 +346,10 @@ def get_model_info(
     override_tag: str | None = None,
 ) -> ModelInfo:
     """
-    Detect model properties and apply an optional tag override in one call.
+    Detect model properties, optionally replacing the detected reasoning tag.
 
-    Wraps detect_model() and calls with_tag() if a tag is supplied, so callers
-    do not need to repeat the override pattern themselves. The detected ModelInfo
-    is cached; the tag override (if any) is applied after cache lookup and is not
-    cached itself, since it is cheap and callers may pass different tags.
-
-    tag may be a raw name ("reasoning"), an HTML tag ("<reasoning>"), or a bracket
-    tag ("[REASONING]") — style is inferred from the format by with_tag().
+    override_tag may be a raw name ("reasoning"), an HTML tag ("<reasoning>"), or a
+    bracket tag ("[REASONING]"), as in ModelInfo.with_tag().
 
     Returns a ModelInfo with the detected properties and any tag override applied.
     """

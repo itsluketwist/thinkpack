@@ -1,4 +1,4 @@
-# inference config
+# evaluation (generation) config
 
 greedy:
   # generation parameters

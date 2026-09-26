@@ -51,7 +51,7 @@ _TAIL_PATTERNS = [
 
 
 def _load_config(profile: str) -> dict:
-    """Load and return inference parameters from inference.yaml for the given profile.
+    """Load and return generation parameters from evaluate.yaml for the given profile.
 
     Returns a flat dict of generation parameters.
     """
@@ -182,7 +182,7 @@ def main() -> None:
         help="path to save results as json (default: print to stdout)",
     )
     parser.add_argument(
-        "--profile", default="greedy", help="profile in config/inference.yaml"
+        "--profile", default="greedy", help="profile in config/evaluate.yaml"
     )
     args = parser.parse_args()
 
@@ -240,10 +240,12 @@ def main() -> None:
     )
     tokenizer = llm.get_tokenizer()
 
-    # apply chat template using the model's default behaviour
+    # apply the chat template using the model's default behaviour, opening the
+    # assistant turn ready for generation
     prompts = thinkpack.apply_chat_templates(
         conversations=conversations,
         tokenizer=tokenizer,
+        add_generation_prompt=True,
         add_generation_reasoning=None,
     )
 

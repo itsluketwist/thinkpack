@@ -16,7 +16,7 @@ from thinkpack.model import ModelInfo, TagStyle, detect_model, get_model_info
 
 
 class TestModelInfoDefaults:
-    """ModelInfo defaults to HTML think tags with no reasoning key."""
+    """ModelInfo defaults to HTML think tags."""
 
     def test_defaults(self) -> None:
         info = ModelInfo(prefixed=False)
@@ -24,7 +24,6 @@ class TestModelInfoDefaults:
         assert info.prefixed is False
         assert info.tag_content == "think"
         assert info.tag_style == TagStyle.HTML
-        assert info.reasoning_key is None
         assert info.open_tag == "<think>"
         assert info.close_tag == "</think>"
 
@@ -38,7 +37,6 @@ class TestModelInfoTags:
         assert info.prefixed is False
         assert info.tag_content == "reasoning"
         assert info.tag_style == TagStyle.HTML
-        assert info.reasoning_key is None
         assert info.open_tag == "<reasoning>"
         assert info.close_tag == "</reasoning>"
 
@@ -52,7 +50,6 @@ class TestModelInfoTags:
         assert info.prefixed is False
         assert info.tag_content == "THINK"
         assert info.tag_style == TagStyle.BRACKET
-        assert info.reasoning_key is None
         assert info.open_tag == "[THINK]"
         assert info.close_tag == "[/THINK]"
 
@@ -70,12 +67,10 @@ class TestModelInfoWithTag:
         assert html_result.prefixed is False
         assert html_result.tag_content == "reasoning"
         assert html_result.tag_style == TagStyle.HTML
-        assert html_result.reasoning_key is None
 
         assert bracket_result.prefixed is False
         assert bracket_result.tag_content == "REASONING"
         assert bracket_result.tag_style == TagStyle.BRACKET
-        assert bracket_result.reasoning_key is None
 
     def test_html_formatted_tag(self) -> None:
         """<tag> format sets HTML style regardless of the original."""
@@ -86,7 +81,6 @@ class TestModelInfoWithTag:
         assert result.prefixed is False
         assert result.tag_content == "reasoning"
         assert result.tag_style == TagStyle.HTML
-        assert result.reasoning_key is None
 
     def test_bracket_formatted_tag(self) -> None:
         """[TAG] format sets BRACKET style regardless of the original."""
@@ -95,21 +89,22 @@ class TestModelInfoWithTag:
         assert result.prefixed is False
         assert result.tag_content == "THINK"
         assert result.tag_style == TagStyle.BRACKET
-        assert result.reasoning_key is None
 
     def test_other_fields_preserved_and_original_unchanged(self) -> None:
-        """with_tag() preserves prefixed and reasoning_key; the original is not modified."""
+        """with_tag() keeps all other fields; the original is not modified."""
         info = ModelInfo(
             prefixed=True,
-            reasoning_key="reasoning_content",
             tag_content="think",
+            strips_think_tags=True,
+            strips_history_think_tags=True,
         )
         result = info.with_tag("reasoning")
 
         assert result.prefixed is True
         assert result.tag_content == "reasoning"
         assert result.tag_style == TagStyle.HTML
-        assert result.reasoning_key == "reasoning_content"
+        assert result.strips_think_tags is True
+        assert result.strips_history_think_tags is True
         assert info.tag_content == "think"
 
 
@@ -129,7 +124,6 @@ class TestGetModelInfo:
         assert info.prefixed is False
         assert info.tag_content == "think"
         assert info.tag_style == TagStyle.HTML
-        assert info.reasoning_key is None
 
     def test_qwen35_detected_values(self, qwen35_tokenizer) -> None:
         """Qwen3.5 is prefixed and uses <think> tags."""
@@ -138,7 +132,6 @@ class TestGetModelInfo:
         assert info.prefixed is True
         assert info.tag_content == "think"
         assert info.tag_style == TagStyle.HTML
-        assert info.reasoning_key is None
 
     def test_deepseek_r1_llama_detected_values(
         self,
@@ -150,7 +143,6 @@ class TestGetModelInfo:
         assert info.prefixed is True
         assert info.tag_content == "think"
         assert info.tag_style == TagStyle.HTML
-        assert info.reasoning_key is None
 
     def test_olmo3_detected_values(self, olmo3_tokenizer) -> None:
         """OLMo-3 is prefixed and uses <think> tags."""
@@ -159,7 +151,6 @@ class TestGetModelInfo:
         assert info.prefixed is True
         assert info.tag_content == "think"
         assert info.tag_style == TagStyle.HTML
-        assert info.reasoning_key is None
 
     def test_ministral_detected_values(self, ministral_tokenizer) -> None:
         """Ministral is not prefixed and uses bracket [THINK] tags, auto-detected."""
@@ -168,7 +159,6 @@ class TestGetModelInfo:
         assert info.prefixed is False
         assert info.tag_content == "THINK"
         assert info.tag_style == TagStyle.BRACKET
-        assert info.reasoning_key is None
 
     def test_raw_tag_override_qwen3(self, qwen3_tokenizer) -> None:
         """Raw tag override on an inline model — tag_content changes, other fields unchanged."""
@@ -177,7 +167,6 @@ class TestGetModelInfo:
         assert result.prefixed is False
         assert result.tag_content == "reasoning"
         assert result.tag_style == TagStyle.HTML
-        assert result.reasoning_key is None
 
     def test_raw_tag_override_deepseek(self, deepseek_r1_llama_tokenizer) -> None:
         """Raw tag override on a prefixed model — prefixed=True is preserved."""
@@ -188,7 +177,6 @@ class TestGetModelInfo:
         assert result.prefixed is True
         assert result.tag_content == "reasoning"
         assert result.tag_style == TagStyle.HTML
-        assert result.reasoning_key is None
 
     def test_bracket_tag_override_qwen3(self, qwen3_tokenizer) -> None:
         """[TAG] override switches an HTML model to BRACKET style."""
@@ -197,7 +185,6 @@ class TestGetModelInfo:
         assert result.prefixed is False
         assert result.tag_content == "THINK"
         assert result.tag_style == TagStyle.BRACKET
-        assert result.reasoning_key is None
 
     def test_bracket_tag_override_olmo3(self, olmo3_tokenizer) -> None:
         """[TAG] override switches a prefixed HTML model to BRACKET style."""
@@ -206,7 +193,6 @@ class TestGetModelInfo:
         assert result.prefixed is True
         assert result.tag_content == "THINK"
         assert result.tag_style == TagStyle.BRACKET
-        assert result.reasoning_key is None
 
     def test_html_tag_override_ministral(self, ministral_tokenizer) -> None:
         """<tag> override switches a BRACKET model to HTML style."""
@@ -215,7 +201,6 @@ class TestGetModelInfo:
         assert result.prefixed is False
         assert result.tag_content == "think"
         assert result.tag_style == TagStyle.HTML
-        assert result.reasoning_key is None
 
     def test_tag_override_does_not_corrupt_cache(self, qwen3_tokenizer) -> None:
         """Tag overrides are not stored in the cache — detected values remain intact."""
@@ -225,7 +210,6 @@ class TestGetModelInfo:
         assert result.prefixed is False
         assert result.tag_content == "think"
         assert result.tag_style == TagStyle.HTML
-        assert result.reasoning_key is None
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +285,7 @@ class TestDetectModelStub:
     """detect_model() edge cases that real tokenizers do not cover."""
 
     def test_dict_chat_template(self) -> None:
-        """A dict of named templates is supported (previously an unhashable-type error)."""
+        """A dict of named templates is supported."""
         tokenizer = _stub(
             chat_template={"default": "uses <think> tags", "tool_use": "other"},
         )

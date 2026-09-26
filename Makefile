@@ -4,9 +4,9 @@ new: newvenv newlint
 
 check: lint test
 
+# create .venv with the dev dependencies (then activate it with: . .venv/bin/activate)
 newvenv:
-	python -m venv .venv
-	. venv/bin/activate
+	uv sync
 
 newlint:
 	pre-commit install

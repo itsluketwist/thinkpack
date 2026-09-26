@@ -1,4 +1,4 @@
-"""Training-time loss masking for reasoning blocks."""
+"""Tokenization of training conversations, with reasoning blocks masked from the loss."""
 
 import logging
 from enum import IntFlag
@@ -12,9 +12,8 @@ from thinkpack.model import ModelInfo, _Tokenizer, _unwrap_tokenizer, get_model_
 _logger = logging.getLogger(__name__)
 
 
-# pytorch's CrossEntropyLoss uses ignore_index=-100 by default, and all major
-# training frameworks (transformers Trainer, trl SFTTrainer, unsloth) inherit
-# this default — exposed as a parameter for the rare case where it differs
+# the label value ignored by the loss — -100 is the pytorch default, used by the
+# transformers Trainer, trl SFTTrainer, and unsloth
 _DEFAULT_IGNORE_INDEX = -100
 
 
@@ -24,12 +23,12 @@ class MaskType(IntFlag):
 
     Combine with | to mask multiple sections at once:
         MaskType.THINK                    — mask only the think block (most common)
-        MaskType.PROMPT | MaskType.THINK  — train on response only
+        MaskType.PROMPT | MaskType.THINK  — train on the response only
 
     PROMPT covers everything before the final reasoning block (system prompt, user
-    instruction, any earlier turns). THINK covers the final reasoning block including its
-    opening and closing tags. RESPONSE covers the model's answer and end-of-turn tokens.
-    Masking RESPONSE is unusual (nothing useful remains to train on) but valid.
+    instruction, any earlier turns). THINK covers the final reasoning block, including
+    its opening and closing tags. RESPONSE covers the model's answer and end-of-turn
+    tokens.
     """
 
     PROMPT = 1
@@ -42,10 +41,10 @@ def _tokenize_with_offsets(
     text: str,
 ) -> tuple[list[int], list[tuple[int, int]]]:
     """
-    Tokenize text once, keeping the character span of every token.
+    Tokenize text, keeping the character span of every token.
 
     The character spans (offsets) let section boundaries found in the text be mapped
-    exactly onto token positions, without re-tokenizing partial strings.
+    onto token positions.
 
     Returns (input_ids, offsets) where offsets[i] is the (start, end) character span
     of token i.
@@ -97,7 +96,7 @@ def _locate_sections(
     Searches backwards from the end of the text, so reasoning tags that appear earlier
     (e.g. in a default system prompt, or an earlier assistant turn) are never matched.
     The response starts at the first non-whitespace character after the closing tag,
-    and is checked against the expected response text so errors fail loudly.
+    and an error is raised if the text there does not match the expected response.
 
     Returns (think_start_char, response_start_char) as character positions.
     """
@@ -121,8 +120,8 @@ def _locate_sections(
     while response_char < len(full_text) and full_text[response_char].isspace():
         response_char += 1
 
-    # sanity check that the response really starts here — templates may trim
-    # surrounding whitespace, so compare against the stripped response
+    # check that the response really starts here — templates may trim surrounding
+    # whitespace, so compare against the stripped response
     if not full_text.startswith(response.strip(), response_char):
         raise ValueError(
             "The text after the final reasoning block does not match the assistant "
@@ -144,20 +143,12 @@ def _tokenize_record(
     add_history_reasoning: bool | None,
 ) -> tuple[dict[str, list[int]], bool]:
     """
-    Tokenize a single training conversation and apply label masking.
+    Tokenize a single training conversation and mask the selected sections.
 
-    The conversation is rendered with the chat template (reasoning embedded), then
-    tokenized once with character offsets. The PROMPT / THINK / RESPONSE boundaries are
-    found as character positions in the rendered text and mapped onto token positions.
-
-    Boundaries are found from the rendered text rather than by rendering the prompt with
-    add_generation_prompt=True. This avoids a subtle issue with PREFIXED templates: the
-    generation prompt already ends with <think>, so using it as a prefix boundary would
-    leave the opening tag trainable while masking the closing tag — teaching the model
-    to "open but never close" the reasoning block.
-
-    Each section flagged in `masked` has its labels set to ignore_index so PyTorch's
-    cross-entropy ignores those tokens during loss computation.
+    The conversation is rendered with the chat template (reasoning embedded) and
+    tokenized. The PROMPT / THINK / RESPONSE boundaries are found as character
+    positions in the rendered text, then mapped onto token positions. Each section in
+    `masked` has its labels set to ignore_index, so it does not count towards the loss.
 
     Returns (record, truncated): record is a dict with input_ids, labels, and
     attention_mask, and truncated is true if the sequence was cut to max_seq_length.
@@ -170,8 +161,7 @@ def _tokenize_record(
     # response text of the final assistant message, used to check the boundaries
     response = conversation[-1].get("content", "")
 
-    # apply the chat template with reasoning embedded, producing the full training
-    # sequence — templates that strip think blocks are handled inside this call
+    # render the full training sequence with the chat template, reasoning included
     full_text = _apply_chat_template(
         conversation=conversation,
         tokenizer=tokenizer,
@@ -181,7 +171,7 @@ def _tokenize_record(
         override_tag=override_tag,
     )
 
-    # tokenize the full text once, keeping each token's character span
+    # tokenize the full text, keeping each token's character span
     input_ids, offsets = _tokenize_with_offsets(
         tokenizer=tokenizer,
         text=full_text,
@@ -249,15 +239,19 @@ def apply_mask(
     """
     Tokenize training conversations and mask selected sections from the loss.
 
-    Each conversation must end with an assistant message containing at least a
-    "content" key (the response). An optional "reasoning" key on that final message
-    provides think block content — if absent when masking is active, an empty reasoning
-    block is injected so training context matches inference time. Combine MaskType flags
-    with | to mask multiple sections at once (see MaskType for details).
+    Each conversation must end with an assistant message (the training target), with
+    a "content" key and an optional "reasoning" key. When masking, a final message with
+    no "reasoning" key gets an empty think block, matching what the model sees at
+    inference. Combine MaskType flags with | to mask several sections, or pass
+    masked=None to train on all tokens.
 
-    Pass masked=None to train on all tokens. add_history_reasoning controls reasoning
-    on earlier assistant messages, exactly as in apply_chat_template(). A warning is
-    logged if any conversation is truncated or left with no trainable tokens.
+    add_history_reasoning controls reasoning on earlier assistant messages, as in
+    apply_chat_template(). override_tag replaces the detected reasoning tag. A fast
+    tokenizer is required. Sequences longer than max_seq_length are truncated, and a
+    warning is logged if any are truncated or left with no trainable tokens.
+
+    The sequences are not padded, so train with a collator that pads labels with
+    ignore_index, such as transformers' DataCollatorForSeq2Seq.
 
     Returns a HuggingFace Dataset with input_ids, labels, and attention_mask columns.
     """
@@ -265,12 +259,11 @@ def apply_mask(
     tokenizer = _unwrap_tokenizer(tokenizer)
     model_info = get_model_info(tokenizer=tokenizer, override_tag=override_tag)
 
-    # normalise None to an empty MaskType so downstream logic is consistent
+    # treat masked=None as an empty mask, so the checks below stay simple
     effective_masked = masked if masked is not None else MaskType(0)
 
-    # when masking is active, inject an empty "reasoning" key into the final assistant
-    # message if it lacks one — ensures the think block appears so it can be masked, and
-    # matches inference time on PREFIXED models that always emit think blocks
+    # when masking, give each final assistant message without reasoning an empty
+    # "reasoning" key, so the think block is present in the sequence and can be masked
     if effective_masked:
         conversations = [
             conv

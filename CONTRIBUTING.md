@@ -16,12 +16,13 @@ Open a [GitHub issue](https://github.com/itsluketwist/thinkpack/issues) describi
 2. Set up your development environment — see [DEVELOPMENT.md](DEVELOPMENT.md).
 3. Make your changes.
 4. Run `make lint` and `make test` — both must pass before submitting.
-5. Open a pull request against `main` with a clear description of what changed and why.
+5. If you changed the public API, update `README.md` and `llms.txt` to match.
+6. Open a pull request against `main` with a clear description of what changed and why.
 
 ## *code style*
 
 - Use Python type hints throughout.
-- Comments should be short and all lower-case — explain *why*, not *what*.
+- Comments should be short, simple, and all lower-case.
 - Each non-empty file should have a one-line docstring at the top.
 - Always include a trailing comma in multi-line function arguments and calls.
 - Keep code readable — this project is read by non-expert reviewers.

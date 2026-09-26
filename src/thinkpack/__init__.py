@@ -1,4 +1,4 @@
-"""ThinkPack — a framework for training, parsing, and evaluating explicit reasoning models."""
+"""ThinkPack — tools for training, parsing, and evaluating explicit reasoning models."""
 
 import logging
 
@@ -15,7 +15,7 @@ from thinkpack.parse import ParsedResponse, parse
 from thinkpack.stats import ResponseStats, compute_stats
 
 
-# standard library logging hygiene — lets users opt in by configuring their own handler
+# log messages are only shown if the user configures logging themselves
 logging.getLogger("thinkpack").addHandler(logging.NullHandler())
 
 

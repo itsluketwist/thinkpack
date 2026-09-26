@@ -52,7 +52,7 @@ class _CheckpointCallback(TrainerCallback):
 
 
 def _load_config(profile: str) -> dict:
-    """Load hyperparameters from training.yaml, merging the named profile on top of defaults.
+    """Load hyperparameters from train.yaml, merging the named profile on top of defaults.
 
     Returns a flat dict of hyperparameter values.
     """
@@ -116,7 +116,7 @@ def main() -> None:
         help="output directory (default: output/<model>-<strategy>/)",
     )
     parser.add_argument(
-        "--profile", default="default", help="profile in config/training.yaml"
+        "--profile", default="default", help="profile in config/train.yaml"
     )
     parser.add_argument(
         "--lr",

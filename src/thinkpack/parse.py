@@ -11,9 +11,8 @@ from thinkpack.model import ModelInfo, _Tokenizer, _unwrap_tokenizer, get_model_
 class ParsedResponse:
     """A model response split into reasoning and answer components.
 
-    Reasoning is classified as valid or invalid. The three invalid sub-types
-    (has_truncated_reasoning, has_empty_reasoning, has_missing_reasoning) are mutually
-    exclusive, and together with has_valid_reasoning they sum to 1.
+    Exactly one of has_valid_reasoning, has_empty_reasoning, has_truncated_reasoning,
+    and has_missing_reasoning is true for each response.
     """
 
     # text after the closing reasoning tag, or the full response if no block was found
@@ -22,7 +21,7 @@ class ParsedResponse:
     # content inside the reasoning block; empty string if no block was present
     reasoning: str
 
-    # tag name as reported by model_info, e.g. "think" (None if no tag found)
+    # the reasoning tag name, e.g. "think" (None if no reasoning block was found)
     reasoning_tag: str | None
 
     # true if the reasoning block was completed and non-blank
@@ -37,15 +36,15 @@ class ParsedResponse:
     # true if no reasoning block structure could be found in the response
     has_missing_reasoning: bool
 
-    # token count of the reasoning content; None if not calculated
+    # token count of the reasoning content; None unless parsed with calculate_tokens=True
     reasoning_token_count: int | None = None
 
-    # token count of the answer content; None if not calculated
+    # token count of the answer content; None unless parsed with calculate_tokens=True
     answer_token_count: int | None = None
 
     @property
     def has_invalid_reasoning(self) -> bool:
-        """True if reasoning is absent, truncated, or empty — not usable for analysis."""
+        """True if reasoning is missing, truncated, or empty."""
         return not self.has_valid_reasoning
 
     @property
@@ -61,11 +60,11 @@ def _prompt_leaves_block_open(
     """
     Check whether a generation prompt ends inside an open reasoning block.
 
-    This is true when the last opening tag in the prompt comes after the last closing
-    tag, e.g. a prompt ending "<think>\n" or "<think>\nLet me think". It is false when
-    the prompt has no tags, or ends with a closed block such as "<think>\n\n</think>"
-    (Qwen3/Qwen3.5 with enable_thinking=False). Tags earlier in the prompt, e.g. in a
-    system prompt, are handled correctly because only the last of each is compared.
+    This is when the last opening tag comes after the last closing tag, e.g. a prompt
+    ending "<think>\n" or "<think>\nLet me think". A prompt with no tags, or ending
+    with a closed block such as "<think>\n\n</think>" (Qwen3 with enable_thinking=False),
+    does not. Only the last tags are compared, so tags earlier in the prompt (e.g. in a
+    system prompt) do not matter.
 
     Returns True if the model's output will continue inside the reasoning block.
     """
@@ -85,13 +84,17 @@ def _parse_single(
     tokenizer: _Tokenizer | None,
     calculate_tokens: bool,
 ) -> ParsedResponse:
-    """Parse one response string using pre-resolved model_info."""
+    """Parse one response string, using an already-detected model_info.
+
+    Returns the ParsedResponse.
+    """
     prefixed = model_info.prefixed
     open_re, close_re = model_info.tag_regex
     close_match = close_re.search(response)
 
     if close_match:
-        # strip the open tag (prefixed models have none in decoded output, sub is a no-op)
+        # a closing tag was found, so the reasoning block is complete — the reasoning
+        # is everything before it, minus the opening tag if the output has one
         before_close = response[: close_match.start()]
         reasoning = open_re.sub("", before_close, count=1).strip()
         answer = response[close_match.end() :].strip()
@@ -119,8 +122,8 @@ def _parse_single(
         )
 
     elif prefixed:
-        # prefixed models inject the open tag via the chat template — it never appears
-        # in decoded output, so a missing close tag means truncation, not absence
+        # the prompt opened the reasoning block, so the output starts inside it — with
+        # no closing tag, the reasoning was never finished
         result = ParsedResponse(
             answer="",
             reasoning=response.strip(),
@@ -209,20 +212,18 @@ def parse(
     Handles standard (<think>content</think>answer), prefixed (content</think>answer),
     truncated standard (<think>content...), and truncated prefixed (content...) formats.
 
-    Pass tokenizer to auto-detect model_info; override_tag overrides the detected tag.
-    Pass model_info directly to skip detection (e.g. when reusing across a batch) — an
-    explicit model_info always takes precedence, and the tokenizer is then only used for
-    token counts. At least one of tokenizer or model_info must be provided.
+    Pass a tokenizer to detect the model's reasoning format, or pass model_info directly
+    to skip detection (model_info wins if both are given, and the tokenizer is then only
+    used for token counts). override_tag replaces the reasoning tag, e.g. "<reasoning>".
 
-    add_generation_reasoning mirrors apply_chat_template's parameter: True/False overrides
-    model_info.prefixed; None defers to prompt-based detection.
+    Pass the generation prompt(s) as prompt, so parse() knows whether the output starts
+    inside an open reasoning block (e.g. the prompt ends with "<think>") or not (e.g. no
+    tags, or a closed block from enable_thinking=False). Only the first prompt is
+    checked, so all prompts should be built the same way. Alternatively, set
+    add_generation_reasoning to True or False to state this directly, as it was passed
+    to apply_chat_template().
 
-    prompt is the generation prompt(s). When provided and add_generation_reasoning is None,
-    the first prompt is checked: the model is treated as prefixed if the prompt ends inside
-    an open reasoning block (e.g. "<think>" or a think_prefix), and as not prefixed
-    otherwise (e.g. no tags, or a closed "<think></think>" block from enable_thinking=False).
-
-    Token counts are populated when calculate_tokens=True and a tokenizer is provided.
+    Token counts are added when calculate_tokens=True and a tokenizer is given.
 
     Returns a ParsedResponse, list[ParsedResponse], or list[list[ParsedResponse]]
     matching the shape of the input.
@@ -240,16 +241,15 @@ def parse(
     else:
         raise ValueError("One of tokenizer or model_info must be provided.")
 
-    # mirror apply_chat_template: True/False overrides detected prefixed state;
-    # None falls through to prompt-based detection
+    # decide whether the output starts inside an open reasoning block: an explicit
+    # add_generation_reasoning wins, otherwise check the prompt if one was given
     if add_generation_reasoning is not None:
         model_info = dataclasses.replace(
             model_info,
             prefixed=add_generation_reasoning,
         )
     elif prompt is not None:
-        # check the first prompt as representative — all prompts in a batch use the
-        # same add_generation_reasoning setting
+        # only the first prompt is checked, assuming the batch was built the same way
         _sample: str | None = (
             prompt if isinstance(prompt, str) else (prompt[0] if prompt else None)
         )

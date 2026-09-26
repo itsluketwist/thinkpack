@@ -1,53 +1,57 @@
 # ThinkPack
 
-> A framework for training, parsing, and evaluating explicit reasoning models — centred on reasoning collapse.
+> A framework for training, parsing, and evaluating explicit reasoning models — focussed on reasoning-trace collapse.
 
-`thinkpack` provides four focused modules for studying and mitigating reasoning collapse in fine-tuned language models.
+`thinkpack` provides four core modules for measuring and mitigating reasoning-trace collapse in fine-tuned language models, plus distillation helpers.
 Install from PyPI:
 
 ```
 pip install thinkpack
 ```
 
-## What is reasoning collapse?
+## What is reasoning-trace collapse?
 
-When fine-tuning reasoning-enabled models on standard instruction-response data, models can stop producing valid reasoning traces — this is *reasoning collapse*. The model learns to skip its `<think>` block entirely because the response alone is sufficient to minimise cross-entropy loss.
+When reasoning models are fine-tuned on standard instruction-response data (answers with no reasoning traces), they can stop producing valid reasoning traces — this is *reasoning-trace collapse*. The model may still answer correctly, but its reasoning block ends up empty or missing.
 
 ```
 before fine-tuning:   x -> <think>reasoning</think> answer
-after naive SFT:      x -> answer
+after naive SFT:      x -> <think></think> answer
+or simply:            x -> answer
 ```
 
-ThinkPack makes this phenomenon observable and measurable, and provides loss masking as a mitigation (its effect is model- and task-dependent).
+ThinkPack makes this measurable, and provides loss masking as a mitigation (its effect is model- and task-dependent, so measure VR after training).
 
 ## What are reasoning blocks?
 
-Reasoning models produce structured outputs interleaving a private reasoning block with the final answer:
+Reasoning models produce outputs with a reasoning block followed by the final answer:
 
 ```
 <think>step-by-step reasoning...</think>
 final answer
 ```
 
-Different models expose this differently, and `thinkpack` abstracts over these differences automatically.
+Different models format this differently, and `thinkpack` handles the differences automatically.
 
-## Template styles
+## Model detection
 
-`TagStyle` (a `StrEnum`) describes the tag format used around the reasoning block:
+Every function detects the model's reasoning format from the tokenizer's chat template, and caches the result. `detect_model(tokenizer)` returns a `ModelInfo`:
 
-- `HTML` — xml-style tags: `<think>content</think>` (used by most models)
-- `BRACKET` — bracket-style tags: `[THINK]content[/THINK]` (used by some models, e.g. Mistral)
+- `tag_content` and `tag_style` — the reasoning tag. `TagStyle` (a `StrEnum`) is `HTML` for `<think>...</think>` (most models) or `BRACKET` for `[THINK]...[/THINK]` (e.g. Mistral). `open_tag` and `close_tag` give the full tag strings.
+- `prefixed` — true if the template adds the opening reasoning tag to the generation prompt (e.g. OLMo-3, DeepSeek-R1).
+- `strips_think_tags` — true if the template strips reasoning from the final assistant message (e.g. DeepSeek-R1).
+- `strips_history_think_tags` — true if the template strips reasoning from earlier assistant messages (e.g. Qwen3, Qwen3.5).
 
-Some models also auto-inject the opening reasoning tag into the generation prompt — this is captured by `ModelInfo.prefixed: bool`. Some templates strip reasoning from the final assistant message (`strips_think_tags`, e.g. DeepSeek-R1) or from earlier assistant messages (`strips_history_think_tags`, e.g. Qwen3, Qwen3.5). `detect_model(tokenizer)` detects all of these automatically — no manual configuration needed. Multimodal processors (e.g. Qwen3.5 via `AutoProcessor`) can be passed wherever a tokenizer is expected.
+Pass `override_tag=` (e.g. `"<reasoning>"` or `"[THINK]"`) to any function if the wrong tag is detected. Multimodal processors (e.g. Qwen3.5 via `AutoProcessor`) can be passed wherever a tokenizer is expected.
 
 ## Module overview
 
 | Module | Purpose |
 |---|---|
-| `thinkpack.chat` | Apply chat templates with optional thought-steering and reasoning history embedding — works uniformly across all model types |
+| `thinkpack.chat` | Apply chat templates with optional thought-steering and reasoning history embedding — works the same across all models |
 | `thinkpack.parse` | Split raw model output into `reasoning` and `answer`, with flags for presence, validity, and truncation |
-| `thinkpack.stats` | Aggregate a batch of `ParsedResponse` objects into VR, ER, TR, MR, and Rpass@1 — the collapse metrics |
-| `thinkpack.mask` | Format training conversations into a pretokenized HuggingFace dataset with configurable loss masking — can help mitigate reasoning collapse during fine-tuning |
+| `thinkpack.stats` | Aggregate a batch of `ParsedResponse` objects into VR, ER, TR, MR, pass@1, and Rpass@1 — the collapse metrics |
+| `thinkpack.mask` | Tokenize training conversations into a HuggingFace dataset with configurable loss masking — can help mitigate collapse during fine-tuning |
+| `thinkpack.distill` | Build prompts asking a teacher model for reasoning traces, and add the extracted traces to training records |
 
 ## Key metrics
 
@@ -56,11 +60,11 @@ Some models also auto-inject the opening reasoning tag into the generation promp
 - **TR (Truncated Reasoning)** — reasoning block opened but never closed (`truncated_reasoning_rate`, `.tr`)
 - **MR (Missing Reasoning)** — no reasoning block at all (`missing_reasoning_rate`, `.mr`)
 - **pass@1** — standard answer accuracy (`pass_at_1`)
-- **Rpass@1** — accuracy conditioned on valid reasoning (`rpass_at_1`)
+- **Rpass@1** — accuracy among responses with valid reasoning (`rpass_at_1`)
 
-VR + ER + TR + MR = 1. Note `.ar` is the answer rate (`answer_rate`), not a reasoning metric. For nested `[task][sample]` input, rates are macro-averaged across tasks; Rpass@1 averages only over tasks with at least one valid-reasoning sample.
+VR + ER + TR + MR = 1. Note `.ar` is the answer rate (`answer_rate`), not a reasoning metric. For nested `[task][sample]` input, rates are averaged across tasks; Rpass@1 averages only over tasks with at least one valid-reasoning sample.
 
-Reasoning collapse is observable as VR → 0 over training steps or data size.
+Reasoning-trace collapse shows up as VR → 0 over training steps or data size.
 
 ## Public API
 
@@ -68,50 +72,58 @@ Reasoning collapse is observable as VR → 0 over training steps or data size.
 import thinkpack
 
 # model detection
-thinkpack.detect_model(tokenizer)       # -> ModelInfo
-thinkpack.get_model_info(tokenizer)     # -> ModelInfo (with caching)
-thinkpack.ModelInfo                     # dataclass: prefixed, tag_content, tag_style, strips_think_tags, strips_history_think_tags, open_tag, close_tag
+thinkpack.detect_model(tokenizer)       # -> ModelInfo (cached per chat template)
+thinkpack.get_model_info(tokenizer, override_tag=None)  # -> ModelInfo, with an optional tag override
+thinkpack.ModelInfo                     # dataclass: prefixed, tag_content, tag_style, strips_think_tags, strips_history_think_tags; properties open_tag, close_tag
 thinkpack.TagStyle                      # StrEnum: HTML | BRACKET
 
-# chat template utilities
-thinkpack.apply_chat_template(conversation, tokenizer)   # -> str
-thinkpack.apply_chat_templates(conversations, tokenizer) # -> list[str]
-# options: think_prefix, response_prefix, add_generation_reasoning (None | True | False),
-# add_history_reasoning (None = template decides | True = always keep | False = always drop)
+# chat templates
+thinkpack.apply_chat_template(conversation, tokenizer, add_generation_prompt=True)   # -> str
+thinkpack.apply_chat_templates(conversations, tokenizer, add_generation_prompt=True) # -> list[str]
+# add_generation_prompt is passed to the tokenizer, which defaults to False — pass True for generation prompts
+# assistant messages may include a "reasoning" key, embedded as the think block
+# options: think_prefix, response_prefix, override_tag,
+#   add_generation_reasoning (None = unchanged | True = ensure open tag | False = remove open tag),
+#   add_history_reasoning (None = template decides | True = always keep | False = always drop)
+# any other kwargs are passed to tokenizer.apply_chat_template()
 
 # parsing
-thinkpack.parse(response, tokenizer)    # -> ParsedResponse | list[ParsedResponse] | list[list[ParsedResponse]]
-thinkpack.parse(response, tokenizer, prompt=prompt)  # pass the prompt, e.g. for enable_thinking=False
-thinkpack.ParsedResponse                # dataclass: answer, reasoning, has_valid_reasoning, has_truncated_reasoning, has_empty_reasoning, has_missing_reasoning
+thinkpack.parse(response, tokenizer)    # -> ParsedResponse | list[ParsedResponse] | list[list[ParsedResponse]], matching the input shape
+thinkpack.parse(response, tokenizer, prompt=prompts)  # pass the generation prompts, so parse knows if the output starts inside an open reasoning block
+# options: model_info (skips detection), override_tag, calculate_tokens, add_generation_reasoning
+thinkpack.ParsedResponse                # dataclass: answer, reasoning, reasoning_tag, has_valid_reasoning, has_empty_reasoning, has_truncated_reasoning, has_missing_reasoning, reasoning_token_count, answer_token_count; properties has_invalid_reasoning, has_answer
 
-# statistics (VR / ER / TR / MR / Rpass@1)
-thinkpack.compute_stats(responses)      # -> ResponseStats
-thinkpack.ResponseStats                 # dataclass: total, valid_reasoning_rate, invalid_reasoning_rate, missing_reasoning_rate, truncated_reasoning_rate, empty_reasoning_rate, answer_rate
+# statistics (VR / ER / TR / MR / pass@1 / Rpass@1)
+thinkpack.compute_stats(responses, results=None)  # -> ResponseStats; results is optional bools, same shape as responses
+thinkpack.ResponseStats                 # dataclass: total, valid_reasoning_rate, invalid_reasoning_rate, missing_reasoning_rate, truncated_reasoning_rate, empty_reasoning_rate, answer_rate, avg_reasoning_tokens, avg_answer_tokens, pass_at_1, rpass_at_1
 
-# training (loss masking — can help mitigate reasoning collapse)
-thinkpack.apply_mask(conversations, tokenizer, masked=thinkpack.MaskType.THINK)  # -> Dataset
-thinkpack.MaskType                      # IntFlag: PROMPT | THINK | RESPONSE
+# training (loss masking — can help mitigate collapse)
+thinkpack.apply_mask(conversations, tokenizer, masked=thinkpack.MaskType.THINK)  # -> Dataset (input_ids, labels, attention_mask)
+thinkpack.MaskType                      # IntFlag: PROMPT | THINK | RESPONSE, combine with |; masked=None trains on all tokens
+# options: max_seq_length=32768, ignore_index=-100, override_tag, add_history_reasoning
+# each conversation must end with the assistant message to train on; requires a fast tokenizer
+# sequences are not padded — use a collator that pads labels with -100, e.g. DataCollatorForSeq2Seq
 
-# distillation utilities
-thinkpack.build_prompts(records)                         # -> list[str]
+# distillation
+thinkpack.build_prompts(records)                         # -> list[str], asking for reasoning in <reasoning_steps> tags
 thinkpack.extract_distilled_reasoning(text)              # -> str | None | list[str | None]
-thinkpack.to_conversations(records)                      # -> list[list[dict]]
-thinkpack.update_records(records, responses)             # -> list[dict]
+thinkpack.update_records(records, responses)             # -> list[dict], with "reasoning" added where found
+thinkpack.to_conversations(records)                      # -> list[list[dict]], ready for apply_mask or apply_chat_template
 ```
 
 ## Docs
 
-- [mask.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/mask.py): loss masking — `MaskType` flag, `apply_mask()` function, template-aware tokenization
+- [chat.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/chat.py): chat templates — `apply_chat_template()`, `apply_chat_templates()`
 - [parse.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/parse.py): response parsing — `ParsedResponse`, `parse()`
 - [stats.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/stats.py): statistics — `ResponseStats`, `compute_stats()`
+- [mask.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/mask.py): loss masking — `MaskType`, `apply_mask()`
 - [model.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/model.py): model detection — `TagStyle`, `ModelInfo`, `detect_model()`, `get_model_info()`
-- [chat.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/chat.py): chat templates — `apply_chat_template()`, `apply_chat_templates()`
-- [distill.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/distill.py): distillation — `build_prompts()`, `extract_distilled_reasoning()`, `to_conversations()`, `update_records()`
+- [distill.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/src/thinkpack/distill.py): distillation — `build_prompts()`, `extract_distilled_reasoning()`, `update_records()`, `to_conversations()`
 
 ## Examples
 
-- [examples/scripts/training.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/examples/scripts/training.py): naive SFT vs masking-based SFT — the core experimental comparison
-- [examples/scripts/inference.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/examples/scripts/inference.py): measuring reasoning collapse with parse + compute_stats (VR, ER, TR, MR)
+- [examples/scripts/training.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/examples/scripts/training.py): naive SFT vs masking-based SFT
+- [examples/scripts/inference.py](https://raw.githubusercontent.com/itsluketwist/thinkpack/main/examples/scripts/inference.py): measuring reasoning-trace collapse with parse + compute_stats
 
 ## Optional
 

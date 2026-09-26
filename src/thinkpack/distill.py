@@ -1,11 +1,10 @@
-"""Distillation utilities for constructing reasoning prompts and extracting reasoning traces."""
+"""Helpers for building reasoning traces for training data, using a teacher model."""
 
 import re
 from typing import overload
 
 
-# default preamble used when none is provided — presents the task as a
-# backwards explanation: given the answer, produce the reasoning that leads to it
+# default preamble — asks the teacher model to explain how to reach a known answer
 _DEFAULT_PREAMBLE = (
     "I need assistance constructing a reasoning dataset.\n"
     "Given the following question and its correct answer, "
@@ -23,11 +22,12 @@ def build_prompts(
     reasoning_example: str | None = None,
 ) -> list[str]:
     """
-    Build construct-mode distillation prompts from a list of records.
+    Build prompts asking a teacher model to write the reasoning for each record.
 
-    Each prompt presents the question and correct answer, asking the model to produce
-    a reasoning trace inside the specified tag. The closing tag should be configured as
-    a stop token so the model stops after reasoning.
+    Each prompt gives the question and its correct answer, and asks for the reasoning
+    steps inside <distill_tag> tags. Set the closing tag (e.g. "</reasoning_steps>") as
+    a stop sequence when generating, so the model stops after the reasoning.
+    reasoning_example optionally replaces the default formatting example.
 
     Returns a list of prompt strings, one per record.
     """
@@ -36,7 +36,7 @@ def build_prompts(
         instruction = record[instruction_key]
         response = record[response_key]
 
-        # build the example block only if one was provided
+        # use the given example, or a default one showing the expected format
         if reasoning_example is not None:
             example_block = f"\n\nHere is a complete example:\n{reasoning_example}"
         else:
@@ -76,14 +76,14 @@ def extract_distilled_reasoning(
     distill_tag: str = "reasoning_steps",
 ) -> str | None | list[str | None]:
     """
-    Extract a distilled reasoning trace from a response to a build_prompts prompt.
+    Extract the reasoning from a teacher model's response to a build_prompts() prompt.
 
-    Accepts a single string or a list; the return type matches the input. Finds the last
-    occurrence of the opening distill_tag and takes everything after it up to the closing
-    tag if present, or everything remaining if it is absent (stop-token scenario).
+    Accepts a single string or a list. Takes the text after the last opening distill_tag,
+    up to the closing tag, or to the end if there is no closing tag (e.g. when it was
+    used as a stop sequence).
 
-    Returns the extracted reasoning string (or None if not found / blank), or a list of
-    the same for list input.
+    Returns the reasoning string, or None if none was found or it is blank (a list of
+    these for list input).
     """
     if isinstance(text, list):
         return [
@@ -97,7 +97,7 @@ def extract_distilled_reasoning(
     open_tag_re = re.compile(rf"<{re.escape(distill_tag)}>", re.IGNORECASE)
     close_tag_re = re.compile(rf"</{re.escape(distill_tag)}>", re.IGNORECASE)
 
-    # use the last open tag — model may output preamble text before the final attempt
+    # use the last opening tag, in case the model repeats the tag earlier in its output
     open_matches = list(open_tag_re.finditer(text))
     if not open_matches:
         return None
@@ -120,16 +120,16 @@ def update_records(
     distill_tag: str = "reasoning_steps",
 ) -> list[dict[str, str]]:
     """
-    Add extracted reasoning traces into a list of records.
+    Add the reasoning from each teacher response to the matching record.
 
-    Calls extract_distilled_reasoning on each response and writes the result into the
-    corresponding record under reasoning_field. Only adds the field where extraction
-    succeeded; records where extraction returns None are returned unchanged. Original
-    records are not mutated.
+    Extracts the reasoning from each response with extract_distilled_reasoning(), and
+    stores it under reasoning_field. Records with no reasoning found are left without
+    the field. responses must be the same length as records. The input records are
+    not changed.
 
-    Returns a new list of record dicts with the reasoning_field added where available.
+    Returns a new list of records, with reasoning_field added where available.
     """
-    # extract from all responses in one call (list path)
+    # extract the reasoning from every response
     extractions: list[str | None] = extract_distilled_reasoning(
         text=responses,
         distill_tag=distill_tag,
@@ -152,12 +152,11 @@ def to_conversations(
     reasoning_key: str = "reasoning",
 ) -> list[list[dict[str, str]]]:
     """
-    Convert records into conversation format compatible with apply_chat_template and apply_mask.
+    Convert records into conversations for apply_chat_template() and apply_mask().
 
-    Each record becomes a two-turn conversation: a user message with the instruction and
-    an assistant message with the response. If the record contains an entry at reasoning_key,
-    it is included as a "reasoning" key on the assistant message so the think block is
-    embedded when the conversation is passed to apply_chat_template or apply_mask.
+    Each record becomes a user message (the instruction) and an assistant message (the
+    response). If the record has reasoning_key, its value is added to the assistant
+    message as "reasoning", so it is embedded as the think block.
 
     Returns a list of conversations, one per record.
     """
@@ -167,7 +166,7 @@ def to_conversations(
             "role": "assistant",
             "content": record[response_key],
         }
-        # only attach reasoning if the record has the key — absence means no think block
+        # only add reasoning if the record has it
         if reasoning_key in record:
             assistant["reasoning"] = record[reasoning_key]
 

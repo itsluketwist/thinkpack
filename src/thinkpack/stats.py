@@ -8,16 +8,14 @@ from thinkpack.parse import ParsedResponse
 
 @dataclass
 class ResponseStats:
-    """Aggregate rates computed over a collection of ParsedResponse objects.
+    """Aggregate statistics over a collection of ParsedResponse objects.
 
-    total is a raw count; all other fields are rates in [0, 1]. For nested input
-    (tasks × samples), rates are macro-averaged across tasks so each task contributes
-    equally; tasks with no samples are excluded from the average. Token averages and
-    pass rates are None when not applicable.
+    total is a count; the rates are fractions in [0, 1]. For nested [task][sample]
+    input, rates are averaged across tasks so each task counts equally, and tasks with
+    no samples are left out. Token averages and pass rates are None when not available.
 
-    valid_reasoning_rate and invalid_reasoning_rate sum to 1. The three invalid sub-type
-    rates (missing_reasoning_rate, empty_reasoning_rate, truncated_reasoning_rate) sum to
-    invalid_reasoning_rate.
+    valid_reasoning_rate and invalid_reasoning_rate sum to 1, and the missing, empty,
+    and truncated reasoning rates sum to invalid_reasoning_rate.
     """
 
     # total number of responses processed
@@ -26,10 +24,10 @@ class ResponseStats:
     # fraction of responses where a reasoning block was completed with non-blank content
     valid_reasoning_rate: float
 
-    # fraction of responses where reasoning was absent, truncated, or empty
+    # fraction of responses where reasoning was missing, truncated, or empty
     invalid_reasoning_rate: float
 
-    # fraction of responses with no reasoning block structure at all (model skipped thinking)
+    # fraction of responses with no reasoning block at all
     missing_reasoning_rate: float
 
     # fraction of responses where a reasoning block opened but never closed
@@ -41,20 +39,18 @@ class ResponseStats:
     # fraction of responses that produced a non-blank answer
     answer_rate: float
 
-    # mean reasoning token count per response (None if not calculated)
+    # mean reasoning token count per response (None unless parsed with calculate_tokens)
     avg_reasoning_tokens: float | None = None
 
-    # mean answer token count per response (None if not calculated)
+    # mean answer token count per response (None unless parsed with calculate_tokens)
     avg_answer_tokens: float | None = None
 
-    # fraction of responses with a correct answer; macro-averaged for nested input
-    # (None if results not provided)
+    # fraction of responses with a correct answer (None if results were not given)
     pass_at_1: float | None = None
 
-    # fraction correct among responses with valid reasoning (None if results not provided
-    # or no responses had valid reasoning). for nested input this is macro-averaged over
-    # only the tasks with at least one valid-reasoning response, since it is undefined
-    # for the others — so it can cover fewer tasks than pass_at_1
+    # fraction correct among responses with valid reasoning (None if results were not
+    # given, or no response had valid reasoning) — for nested input, only tasks with at
+    # least one valid-reasoning response are averaged
     rpass_at_1: float | None = None
 
     @property
@@ -89,12 +85,13 @@ class ResponseStats:
 
 
 def _aggregate(task_stats: list[ResponseStats]) -> ResponseStats:
-    """Macro-average a list of per-task ResponseStats into a single ResponseStats.
+    """Average a list of per-task ResponseStats into a single ResponseStats.
 
-    Tasks with no samples have undefined rates, so they are excluded from the average
-    rather than counted as zero.
+    Tasks with no samples are left out, as their rates are undefined.
+
+    Returns the averaged ResponseStats, with total summed across tasks.
     """
-    # exclude empty tasks — their rates are undefined, not zero
+    # leave out empty tasks, as their rates are undefined
     task_stats = [s for s in task_stats if s.total > 0]
     n = len(task_stats)
     if n == 0:
@@ -139,15 +136,14 @@ def compute_stats(
 ) -> ResponseStats:
     """Compute aggregate statistics over a flat or nested list of parsed responses.
 
-    For nested list[list[ParsedResponse]] input (tasks × samples), runs the same flat
-    computation on each task then macro-averages the rates — so each task contributes
-    equally regardless of sample count. total is always the sum across all tasks.
+    For nested [task][sample] input, stats are computed per task and then averaged,
+    so each task counts equally regardless of its number of samples.
 
-    Pass results (matching the shape of responses) to compute pass_at_1 and rpass_at_1.
-    Token averages are populated if the responses were parsed with calculate_tokens=True.
+    Pass results (booleans with the same shape as responses) to compute pass_at_1 and
+    rpass_at_1. Token averages are included if the responses were parsed with
+    calculate_tokens=True.
 
-    Returns a ResponseStats with a total count, macro-averaged rates, token averages,
-    and pass rates.
+    Returns a ResponseStats with the total count, rates, token averages, and pass rates.
     """
     # nested input — compute per-task stats then aggregate
     if responses and isinstance(responses[0], list):
@@ -174,12 +170,14 @@ def compute_stats(
     def _rate(vals: list[bool | int]) -> float:
         return sum(vals) / total if total else 0.0
 
+    # token averages, only if token counts were calculated when parsing
     avg_reasoning_tokens: float | None = None
     avg_answer_tokens: float | None = None
     if total > 0 and any(r.reasoning_token_count is not None for r in flat):
         avg_reasoning_tokens = sum(r.reasoning_token_count or 0 for r in flat) / total
         avg_answer_tokens = sum(r.answer_token_count or 0 for r in flat) / total
 
+    # pass rates, only if results were given
     pass_at_1: float | None = None
     rpass_at_1: float | None = None
     if results is not None and total > 0:

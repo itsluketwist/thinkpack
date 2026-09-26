@@ -1,8 +1,8 @@
-"""Example: Measuring reasoning collapse with ThinkPack.
+"""Example: measuring reasoning-trace collapse with ThinkPack.
 
-After generation, parse outputs and compute VR (valid reasoning) and IR (invalid reasoning)
-rates. A model exhibiting reasoning collapse will show VR near zero and IR near one — it
-stops producing valid <think> blocks despite being trained on a reasoning-enabled base model.
+Generates responses, parses them into reasoning and answer, and computes the collapse
+metrics. A model that has collapsed shows VR (valid reasoning) near zero, as it stops
+producing valid <think> blocks.
 """
 
 from vllm import LLM, SamplingParams
@@ -23,12 +23,12 @@ conversations = [
 ]
 
 # --- apply chat template ---
-# apply_chat_templates handles template detection automatically.
-# think_prefix=None (default) leaves thought seeding to the model; add_generation_reasoning=None
-# (default) leaves the template output unchanged — pass True to ensure the <think> tag is open.
+# the model's reasoning format is detected from the tokenizer.
+# add_generation_prompt=True opens the assistant turn, ready for generation.
 prompts = thinkpack.apply_chat_templates(
     conversations=conversations,
     tokenizer=tokenizer,
+    add_generation_prompt=True,
 )
 
 # --- generate ---
@@ -41,33 +41,31 @@ outputs = llm.generate(
     ),
 )
 
-# --- ThinkPack: parse all outputs into reasoning and answer components ---
-# extract the generated text from each vLLM RequestOutput: one list per conversation,
-# one string per sample (n=1 here, so each inner list has a single entry).
+# --- parse outputs into reasoning and answer ---
+# vllm returns one list of samples per prompt (n=1 here, so one string per list).
+# passing the prompts lets parse() see whether each output starts inside a think block.
 texts = [[c.text for c in o.outputs] for o in outputs]
 parsed = thinkpack.parse(
     response=texts,
     tokenizer=tokenizer,
+    prompt=prompts,
 )
 
-# --- ThinkPack: compute VR and IR rates to measure reasoning collapse ---
-# VR (valid reasoning): fraction with a complete, non-blank reasoning block.
-# IR (invalid reasoning): fraction where reasoning was absent, truncated, or empty.
-# collapse is observable as VR -> 0 (and IR -> 1) over training steps or data size.
-# all rate fields in ResponseStats are already fractions in [0, 1].
+# --- compute the collapse metrics ---
+# all rates are fractions in [0, 1], and VR + MR + ER + TR = 1.
+# collapse shows up as VR -> 0 over training steps or data size.
 s = thinkpack.compute_stats(responses=parsed)
-print(f"total responses:         {s.total}")
-print(f"VR (valid reasoning):    {s.vr:.2%}")
-print(f"IR (invalid reasoning):  {s.invalid_reasoning_rate:.2%}")
-print(f"  missing:               {s.mr:.2%}")
-print(f"  empty:                 {s.er:.2%}")
-print(f"  truncated:             {s.tr:.2%}")
-print(f"has answer:              {s.answer_rate:.2%}")
+print(f"total responses:  {s.total}")
+print(f"VR (valid):       {s.vr:.2%}")
+print(f"MR (missing):     {s.mr:.2%}")
+print(f"ER (empty):       {s.er:.2%}")
+print(f"TR (truncated):   {s.tr:.2%}")
+print(f"has answer:       {s.answer_rate:.2%}")
 print()
 
 # inspect individual responses
 for task_parsed in parsed:
-    # task_parsed is a list with one entry per sample (n=1 here, so index 0)
+    # each task has one entry per sample (n=1 here, so index 0)
     p = task_parsed[0]
     print(f"answer:              {p.answer}")
     print(f"has_valid_reasoning: {p.has_valid_reasoning}")

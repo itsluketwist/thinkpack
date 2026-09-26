@@ -909,7 +909,7 @@ class TestMinistralParse:
 
 
 # ---------------------------------------------------------------------------
-# regression tests — prompt detection in both directions, model_info precedence
+# prompt detection in both directions, and model_info precedence
 # ---------------------------------------------------------------------------
 
 

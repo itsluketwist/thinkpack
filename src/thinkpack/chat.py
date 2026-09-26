@@ -1,4 +1,4 @@
-"""Inference-time chat templating with thought-steering and response prefix injection."""
+"""Chat templating that works across reasoning models, with optional thought-steering."""
 
 from thinkpack.model import ModelInfo, _Tokenizer, _unwrap_tokenizer, get_model_info
 
@@ -11,16 +11,16 @@ def _inject_prefixes(
     include_reasoning: bool | None = True,
 ) -> str:
     """
-    Inject thought-steering and response prefix into an already-templated prompt string.
+    Add the think and response prefixes to an already-templated prompt.
 
-    include_reasoning controls the open reasoning tag:
-      - True  : enforce its presence — add the tag for non-prefixed models, keep for prefixed.
-      - False : enforce its absence — strip the tag if a prefixed template injected one.
-      - None  : passive — leave the template output exactly as-is.
+    include_reasoning controls the opening reasoning tag at the end of the prompt:
+      - True  : make sure it is there, adding it if needed.
+      - False : make sure it is not there, removing it if the template added one.
+      - None  : leave the prompt as the template produced it.
 
-    think_prefix seeds the model's reasoning after the open tag.
-    response_prefix seeds the model's response; for include_reasoning=False the tag is
-    stripped first (if present), for True/None an existing open tag is closed first.
+    think_prefix seeds the model's reasoning after the opening tag.
+    response_prefix seeds the model's response. If the prompt ends with an opening tag,
+    it is closed first (or removed, when include_reasoning is False).
 
     Returns the prompt string ready for generation.
     """
@@ -30,19 +30,19 @@ def _inject_prefixes(
     already_open = _prompt.endswith(open_tag)
 
     if think_prefix is None and response_prefix is None:
-        # no prefixes, just enforce tag presence or absence if needed
+        # no prefixes, so only add or remove the opening tag if needed
 
         if include_reasoning is None:
             # no changes needed, return as-is
             return prompt
         elif include_reasoning is False and already_open:
-            # ensure no open tag, stripping it if a prefixed template injected one
+            # remove the opening tag added by the template
             return _prompt[: -len(open_tag)]
         elif include_reasoning is True and not already_open:
-            # ensure the open tag is present, adding it if needed
+            # add the missing opening tag
             return _prompt + f"\n{open_tag}"
 
-        # include_reasoning=True + already_open, or False + not already_open: nothing to do
+        # the prompt already matches what was asked for
         return _prompt
 
     if think_prefix is not None:
@@ -59,10 +59,10 @@ def _inject_prefixes(
             _prompt += f"\n{close_tag}"
         elif already_open:
             if include_reasoning is False:
-                # remove the tag from a prefixed template
+                # remove the opening tag added by the template
                 _prompt = _prompt[: -len(open_tag)]
             else:
-                # close the block (True: explicitly; None: closes template-injected block)
+                # close the block the template opened
                 _prompt += f"\n{close_tag}"
 
         _prompt += f"\n{response_prefix}"
@@ -70,8 +70,8 @@ def _inject_prefixes(
     return _prompt
 
 
-# sentinel format used to mark think-injection points for strips_think_tags models;
-# template rendering is done with these placeholders, then replaced with the real blocks
+# placeholder for a message whose reasoning the template would strip — the template is
+# rendered with the placeholder, which is then swapped for the real reasoning and content
 _THINK_SENTINEL = "___THINK_INJECT_{idx}___"
 
 
@@ -81,26 +81,23 @@ def _prepare_messages(
     add_history_reasoning: bool | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, str]]:
     """
-    Embed reasoning into assistant messages as literal tags prepended to content.
+    Embed each assistant message's 'reasoning' key into its content as a think block.
 
-    The 'reasoning' key controls behaviour: if absent, the message passes through
-    unchanged; if present and blank, an empty think block is prepended; if present
-    and non-blank, a complete block wrapping the reasoning text is prepended.
+    Messages without a 'reasoning' key are unchanged. A blank 'reasoning' becomes an
+    empty think block, and non-blank reasoning is wrapped in the reasoning tags.
 
-    Messages before the last user message are "history". Some templates (e.g. Qwen3)
-    strip reasoning from history, so add_history_reasoning controls these messages:
-      - None  : embed the tags and let the template decide what to keep.
-      - True  : always keep the reasoning, even if the template would strip it.
-      - False : always drop the reasoning.
-    Messages after the last user message (the final assistant turn) always keep their
-    reasoning, as this is required for training.
+    Assistant messages before the last user message are "history", and
+    add_history_reasoning controls their reasoning:
+      - None  : embed it and let the template decide whether to keep it.
+      - True  : always keep it, even if the template would strip it.
+      - False : always drop it.
+    The final assistant message always keeps its reasoning.
 
-    Where the template would strip a block that should be kept, a sentinel placeholder
-    replaces the assistant content during template rendering, and the think+content
-    block is recorded for substitution after the template runs.
+    If the template would strip reasoning that should be kept, the message content is
+    replaced by a placeholder, to be swapped back after the template is rendered.
 
-    Returns (prepared_messages, sentinel_map) where sentinel_map maps each sentinel string
-    to its think+content replacement. Empty when no sentinels are needed.
+    Returns (prepared_messages, sentinel_map), where sentinel_map maps each placeholder
+    to its replacement text (empty when no placeholders are needed).
     """
     prepared = []
     sentinel_map: dict[str, str] = {}
@@ -125,9 +122,9 @@ def _prepare_messages(
             prepared.append(base)
             continue
 
-        # decide whether the template would strip this block when we want to keep it
+        # decide whether the template would strip reasoning that should be kept
         if is_history:
-            # history reasoning is only forced back in when explicitly requested
+            # history reasoning is only kept against the template when asked for
             use_sentinel = (
                 add_history_reasoning is True and model_info.strips_history_think_tags
             )
@@ -145,8 +142,8 @@ def _prepare_messages(
             think_block = f"{model_info.open_tag}\n{model_info.close_tag}\n"
 
         if use_sentinel:
-            # template would strip the think block, so use a sentinel instead;
-            # the real think+content is recorded and re-injected after rendering
+            # the template would strip the think block, so render a placeholder instead
+            # and record the real text to swap back in afterwards
             sentinel = _THINK_SENTINEL.format(idx=idx)
             sentinel_map[sentinel] = think_block + content
             prepared.append({**base, "content": sentinel})
@@ -169,42 +166,40 @@ def apply_chat_template(
     **kwargs: object,
 ) -> str:
     """
-    Apply the chat template to a single conversation with optional thought-steering.
+    Apply the chat template to a single conversation, with optional thought-steering.
 
-    Mirrors the tokenizer's apply_chat_template signature. Template style is detected
-    automatically from the tokenizer. Always returns a prompt string — tokenization is
-    left to the caller.
+    Works like the tokenizer's own apply_chat_template(), but handles each model's
+    reasoning format automatically. Always returns a string, not token ids.
 
-    Assistant messages may include a 'reasoning' key alongside 'role' and 'content'.
-    If absent the message is unchanged. If present and blank, an empty think block is
-    embedded. If present and non-blank, a complete block wrapping the reasoning is
-    embedded. This works for any model regardless of template style.
+    add_generation_prompt is passed to the tokenizer. When None (default) the
+    tokenizer's own default is used, which is False for HuggingFace tokenizers — so
+    pass True when building a prompt for generation.
 
-    add_generation_reasoning controls the open reasoning tag in the generation prompt:
+    Assistant messages may include a 'reasoning' key alongside 'role' and 'content',
+    which is embedded as a think block (an empty block if the reasoning is blank).
+
+    add_generation_reasoning controls the opening reasoning tag in the generation prompt:
       - None  : leave the template output unchanged (default).
-      - True  : ensure the open tag is present, adding it for non-prefixed models.
-      - False : strip the open tag if a prefixed template injected one.
+      - True  : make sure the opening tag is there, adding it if needed.
+      - False : make sure it is not there, removing it if the template added one.
 
     add_history_reasoning controls reasoning on assistant messages before the last user
     message, which some templates (e.g. Qwen3) strip:
-      - None  : leave it to the template (default).
+      - None  : let the template decide (default).
       - True  : always keep the reasoning, even if the template would strip it.
       - False : always drop the reasoning.
 
-    think_prefix seeds the model's reasoning inside the open block.
-    response_prefix seeds the response after the block closes.
-    add_generation_prompt is forwarded directly to the tokenizer; when None (default)
-    the tokenizer's own default is used.
+    think_prefix seeds the model's reasoning inside an open reasoning block.
+    response_prefix seeds the response, closing any open reasoning block first.
+    override_tag replaces the detected reasoning tag, e.g. "<reasoning>".
+    Any other kwargs are passed to tokenizer.apply_chat_template().
 
-    Additional kwargs are forwarded to tokenizer.apply_chat_template(), allowing
-    model-specific parameters to be passed through.
-
-    Returns a prompt string ready to pass directly to a generation function.
+    Returns the templated prompt string.
     """
     if add_generation_reasoning is False and think_prefix is not None:
         raise ValueError(
-            "add_generation_reasoning=False cannot be combined with think_prefix — "
-            "reasoning block absence contradicts injecting a thought prefix directly"
+            "add_generation_reasoning=False cannot be combined with think_prefix, "
+            "as a think prefix needs an open reasoning block"
         )
     if add_generation_prompt is False and (
         think_prefix is not None
@@ -219,6 +214,7 @@ def apply_chat_template(
     # multimodal processors wrap the text tokenizer — use the tokenizer directly
     tokenizer = _unwrap_tokenizer(tokenizer)
 
+    # detect the model's reasoning format, then embed any reasoning into the messages
     model_info = get_model_info(
         tokenizer=tokenizer,
         override_tag=override_tag,
@@ -241,7 +237,7 @@ def apply_chat_template(
         # some tokenizers return token ids despite tokenize=False
         templated = tokenizer.decode(templated)
 
-    # re-inject think blocks bypassed via sentinels (strips_think_tags models)
+    # swap placeholders back for the reasoning the template would have stripped
     for sentinel, replacement in sentinel_map.items():
         templated = templated.replace(sentinel, replacement)
 
@@ -259,10 +255,11 @@ def _resolve_prefix(
     n: int,
     name: str,
 ) -> list[str | None]:
-    """Expand a prefix argument into a per-conversation list of length n.
+    """Expand a prefix argument into one prefix per conversation.
 
-    A plain string is broadcast to all n conversations; a list is validated
-    and returned as-is; None becomes a list of None values.
+    A string or None is repeated n times; a list must already have length n.
+
+    Returns a list of n prefixes.
     """
     if isinstance(prefix, list):
         if len(prefix) != n:
@@ -288,9 +285,9 @@ def apply_chat_templates(
     """
     Apply the chat template to a list of conversations.
 
-    Convenience wrapper around apply_chat_template for batched use. think_prefix and
-    response_prefix may each be a plain string (applied to every conversation) or a
-    list with one entry per conversation. All other arguments are forwarded unchanged.
+    Calls apply_chat_template() on each conversation. think_prefix and response_prefix
+    may each be a single string (used for every conversation) or a list with one entry
+    per conversation. All other arguments are passed through unchanged.
 
     Returns a list of prompt strings, one per conversation.
     """
