@@ -18,7 +18,7 @@ before fine-tuning:   x -> <think>reasoning</think> answer
 after naive SFT:      x -> answer
 ```
 
-ThinkPack makes this phenomenon observable, measurable, and preventable.
+ThinkPack makes this phenomenon observable and measurable, and provides loss masking as a mitigation (its effect is model- and task-dependent).
 
 ## What are reasoning blocks?
 
@@ -47,7 +47,7 @@ Some models also auto-inject the opening reasoning tag into the generation promp
 | `thinkpack.chat` | Apply chat templates with optional thought-steering and reasoning history embedding — works uniformly across all model types |
 | `thinkpack.parse` | Split raw model output into `reasoning` and `answer`, with flags for presence, validity, and truncation |
 | `thinkpack.stats` | Aggregate a batch of `ParsedResponse` objects into VR, ER, TR, MR, and Rpass@1 — the collapse metrics |
-| `thinkpack.mask` | **Core.** Format training conversations into a pretokenized HuggingFace dataset with configurable loss masking — prevents reasoning collapse during fine-tuning |
+| `thinkpack.mask` | Format training conversations into a pretokenized HuggingFace dataset with configurable loss masking — can help mitigate reasoning collapse during fine-tuning |
 
 ## Key metrics
 
@@ -88,7 +88,7 @@ thinkpack.ParsedResponse                # dataclass: answer, reasoning, has_vali
 thinkpack.compute_stats(responses)      # -> ResponseStats
 thinkpack.ResponseStats                 # dataclass: total, valid_reasoning_rate, invalid_reasoning_rate, missing_reasoning_rate, truncated_reasoning_rate, empty_reasoning_rate, answer_rate
 
-# training (core — prevents reasoning collapse)
+# training (loss masking — can help mitigate reasoning collapse)
 thinkpack.apply_mask(conversations, tokenizer, masked=thinkpack.MaskType.THINK)  # -> Dataset
 thinkpack.MaskType                      # IntFlag: PROMPT | THINK | RESPONSE
 

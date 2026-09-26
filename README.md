@@ -12,7 +12,7 @@ Focussed on the characterisation and mitigation of **reasoning-trace collapse**.
 - 💬 **[Chat templating](#thinkpackchat--chat-templating)** (`thinkpack.chat`) — applies chat templates with optional thought-steering and reasoning history embedding.
 - 🔍 **[Response parsing](#thinkpackparse--response-parsing)** (`thinkpack.parse`) — splits raw model output into reasoning and answer components, with flags for presence, validity, and truncation.
 - 📊 **[Statistics](#thinkpackstats--response-statistics)** (`thinkpack.stats`) — aggregates parsed responses into VR, ER, TR, MR, and Rpass@1, making reasoning-trace collapse measurable.
-- 🎭 **[Loss masking](#thinkpackmask--training-time-loss-masking)** (`thinkpack.mask`) — the core method; prevents reasoning-trace collapse during fine-tuning by masking think blocks from the loss.
+- 🎭 **[Loss masking](#thinkpackmask--training-time-loss-masking)** (`thinkpack.mask`) — masks think blocks from the loss during fine-tuning, a simple mitigation that can help preserve reasoning traces.
 
 > 📄 Accompanies the paper [**Reasoning-Trace Collapse: Evaluating the Loss of Explicit Reasoning During Fine-Tuning**](https://arxiv.org/abs/2605.21127), accepted to the NeurIPS 2026 Evaluations and Datasets Track — see [*citation*](#citation).
 
@@ -39,6 +39,7 @@ Standard supervised fine-tuning then gives the model a clear signal to produce t
 - missing: no reasoning trace can be extracted
 
 It also supports reasoning-aware loss masking, so you can fine-tune on non-reasoning data without directly rewarding the model for producing empty or missing reasoning.
+Masking can mitigate collapse, but its effect is model- and task-dependent (in the paper, it only partially helps OLMo-3), so it is worth measuring VR after fine-tuning rather than assuming reasoning has been preserved.
 
 ---
 
@@ -193,19 +194,21 @@ Reasoning collapse is observable as VR → 0 over training steps or data size.
 
 ### `thinkpack.mask` — Training-time loss masking
 
-The core method. When fine-tuning a reasoning model, `apply_mask()` formats training records into a pretokenized HuggingFace dataset with selected sections excluded from the loss. Masking the think block prevents the model from learning to skip it.
+When fine-tuning a reasoning model, `apply_mask()` formats training records into a pretokenized HuggingFace dataset with selected sections excluded from the loss.
+Masking the think block means the model is not directly trained to produce empty or missing reasoning, which can help preserve its reasoning traces.
+How much it helps is model- and task-dependent, so check VR with [`thinkpack.stats`](#thinkpackstats--response-statistics) after training.
 
 ```python
 import thinkpack
 
-# masking-based SFT — prevents reasoning-trace collapse
+# masking-based SFT — can help mitigate reasoning-trace collapse
 dataset = thinkpack.apply_mask(
     conversations=conversations,  # list of conversation dicts with "role" and "content" keys
     tokenizer=tokenizer,
     masked=thinkpack.MaskType.THINK,  # mask the think block from the loss
 )
 
-# naive SFT — causes reasoning-trace collapse (use as baseline)
+# naive SFT — baseline, can lead to reasoning-trace collapse
 naive_dataset = thinkpack.apply_mask(
     conversations=conversations,
     tokenizer=tokenizer,

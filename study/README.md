@@ -1,7 +1,7 @@
 # ***Reasoning-Trace Collapse: Empirical Study Replication Package***
 
 This package reproduces the experiments from the research paper ***"Reasoning-Trace Collapse: Evaluating the Loss of Explicit Reasoning During Fine-Tuning"***.
-It contains the training and evaluation code needed to observe the reasoning collapse phenomenon - where models that reason by default (using `<think>...</think>` blocks) stop reasoning entirely after fine-tuning on standard instruction-response data - and to compare strategies that prevent it.
+It contains the training and evaluation code needed to observe the reasoning collapse phenomenon - where models that reason by default (using `<think>...</think>` blocks) stop reasoning entirely after fine-tuning on standard instruction-response data - and to compare strategies that aim to mitigate it.
 
 Two scripts cover the full experimental workflow:
 
@@ -88,10 +88,10 @@ The `--strategy` flag controls how the training data is prepared:
 # baseline — model's default chat template behaviour (collapse expected)
 python train.py --model Qwen/Qwen3-8B --strategy default --lr 1e-5
 
-# core prevention method — mask think block from loss
+# mitigation — mask think block from loss
 python train.py --model Qwen/Qwen3-8B --strategy mask --lr 1e-5
 
-# alternative prevention method — train on response only
+# alternative mitigation — train on response only
 python train.py --model Qwen/Qwen3-8B --strategy respond --lr 1e-5
 
 # train with an empty think block included in loss
@@ -197,7 +197,7 @@ python train.py --model nvidia/OpenReasoning-Nemotron-7B --strategy default --lr
 
 ### *strategy comparison (lr = 1e-5)*
 
-Four strategies are compared at a fixed learning rate to evaluate which approaches prevent collapse.
+Four strategies are compared at a fixed learning rate to evaluate how well each approach mitigates collapse.
 
 **`qwen3-8b`** (`Qwen/Qwen3-8B`):
 

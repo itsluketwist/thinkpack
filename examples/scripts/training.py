@@ -1,6 +1,6 @@
-"""Example: Naive SFT vs masking-based SFT to prevent reasoning collapse.
+"""Example: Naive SFT vs masking-based SFT to mitigate reasoning collapse.
 
-Shows the single-line ThinkPack change that prevents reasoning collapse
+Shows the single-line ThinkPack change that can help mitigate reasoning collapse
 during fine-tuning on standard instruction-response data.
 """
 
@@ -30,27 +30,27 @@ conversations = [
     ],
 ]
 
-# --- naive SFT (causes reasoning collapse) ---
+# --- naive SFT (can cause reasoning collapse) ---
 # all tokens contribute to the loss, including any generated <think> blocks.
-# the model learns to skip reasoning, since the response alone minimises loss.
+# the model can learn to skip reasoning, since the response alone minimises loss.
 naive_dataset = thinkpack.apply_mask(
     conversations=conversations,
     tokenizer=tokenizer,
     masked=None,  # no masking — naive baseline
 )
 
-# --- masking-based SFT (prevents reasoning collapse) ---
+# --- masking-based SFT (can help mitigate reasoning collapse) ---
 # the think block is excluded from the loss; the model is not penalised for reasoning.
-# this preserves reasoning behaviour while still training on the response.
+# this can help preserve reasoning behaviour, though the effect is model- and task-dependent.
 # template style (INLINE, NATIVE, PREFIXED) is detected automatically from the tokenizer.
 masked_dataset = thinkpack.apply_mask(
     conversations=conversations,
     tokenizer=tokenizer,
-    masked=thinkpack.MaskType.THINK,  # mask the think block (core method)
+    masked=thinkpack.MaskType.THINK,  # mask the think block from the loss
 )
 
 # --- train ---
-# swap naive_dataset for masked_dataset to compare collapse vs no collapse.
+# swap between naive_dataset and masked_dataset to compare their effect on collapse.
 # all other training code is identical — this is the only change.
 
 trainer = Trainer(

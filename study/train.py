@@ -106,7 +106,7 @@ def main() -> None:
             "default/bare = use the model's native chat template behaviour (Qwen3 emits empty "
             "<think></think>, OLMo emits <think> prefix — collapse is model-dependent); "
             "empty = inject an empty <think></think> block and train on it with full loss; "
-            "mask = inject an empty think block and mask it from loss (prevents collapse); "
+            "mask = inject an empty think block and mask it from loss (can mitigate collapse); "
             "respond = mask think block + prompt, train only on response tokens"
         ),
     )
@@ -212,7 +212,7 @@ def main() -> None:
     #   an opening <think>). collapse behaviour is model-dependent.
     # empty: no masking, but empty reasoning key added in _build_conversations so the empty
     #   think block tokens are present in the training sequence and contribute to loss.
-    # mask: mask the think block from loss (the core method for preventing collapse).
+    # mask: mask the think block from loss (the main mitigation we evaluate; model-dependent).
     # respond: mask think block + prompt, training only on response tokens.
     strategy_mask = {
         "default": None,
